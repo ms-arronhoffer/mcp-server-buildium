@@ -36,8 +36,6 @@ const ENV_TO_CONFIG_KEY = {
   LLM_MODEL: "llmModel",
 };
 
-const CONFIG_KEYS = new Set(Object.values(ENV_TO_CONFIG_KEY));
-
 async function readJson(path) {
   return JSON.parse(await readFile(path, "utf8"));
 }
@@ -52,10 +50,11 @@ async function resolveBakedConfig() {
   const baked = {};
 
   // 1) Optional config.defaults.json (git-ignored; distributor-provided).
+  //    Keyed by the same ENV-style names documented in config.defaults.example.json.
   try {
     const fromFile = await readJson(join(root, "config.defaults.json"));
-    for (const key of CONFIG_KEYS) {
-      const value = fromFile[key];
+    for (const [envName, key] of Object.entries(ENV_TO_CONFIG_KEY)) {
+      const value = fromFile[envName];
       if (typeof value === "string" && value.trim() !== "") baked[key] = value.trim();
     }
   } catch {
