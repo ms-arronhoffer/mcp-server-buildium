@@ -116,10 +116,9 @@ def test_chat_executes_inprocess_tool(client, monkeypatch) -> None:
     resp = client.post("/chat", json={"messages": [{"role": "user", "content": "status?"}]})
     assert resp.status_code == 200
     events = _sse_events(resp.text)
-    tool_results = [e for e in events if e["type"] == "tool_result"]
-    assert tool_results and tool_results[0]["name"] == "health_check"
-    # The real tool executed in-process and returned the health envelope.
-    assert '"status": "ok"' in tool_results[0]["text"] or '"status":"ok"' in tool_results[0]["text"]
+    # Internal tool-call/result events must never be surfaced to the chat UI.
+    assert not [e for e in events if e["type"] in ("tool_call", "tool_result")]
+    # The tool still executed in-process (the model answered on the second turn).
     assert events[-1] == {"type": "done", "content": "All good."}
 
 
@@ -210,3 +209,35 @@ def test_authenticate_returns_verified_claims() -> None:
         assert ok is True and claims == {}
 
     asyncio.run(run())
+
+
+def test_current_datetime_note_mentions_now_and_utc() -> None:
+    from datetime import UTC, datetime
+
+    note = chat_endpoint._current_datetime_note(
+        datetime(2026, 7, 3, 19, 22, 29, tzinfo=UTC)
+    )
+    assert "2026-07-03T19:22:29Z" in note
+    assert "UTC" in note
+    assert "now" in note.lower()
+
+
+def test_chat_system_prompt_includes_current_datetime(client, monkeypatch) -> None:
+    """The assistant's system prompt is augmented with the current date/time."""
+    captured: dict = {}
+
+    class StubProvider:
+        def __init__(self, *a, **k) -> None:
+            pass
+
+        async def complete(self, messages, tools):
+            captured["messages"] = messages
+            return Completion(content="Done.")
+
+    monkeypatch.setattr(chat_endpoint, "build_provider", lambda *a, **k: StubProvider())
+
+    resp = client.post("/chat", json={"messages": [{"role": "user", "content": "hi"}]})
+    assert resp.status_code == 200
+    system = captured["messages"][0]
+    assert system["role"] == "system"
+    assert "current date and time is" in system["content"].lower()

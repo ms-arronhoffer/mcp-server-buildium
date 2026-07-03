@@ -8,17 +8,10 @@ from ..buildium_client import BuildiumClient
 from . import _common as c
 
 try:
-    from mcp_server_buildium.buildium_sdk.models.rental_property_post_message import (
-        RentalPropertyPostMessage,
-    )
     from mcp_server_buildium.buildium_sdk.models.rental_property_put_message import (
         RentalPropertyPutMessage,
     )
 except ImportError:  # pragma: no cover
-
-    class RentalPropertyPostMessage:  # type: ignore[no-redef]
-        def __init__(self, **kwargs):
-            self.__dict__.update(kwargs)
 
     class RentalPropertyPutMessage:  # type: ignore[no-redef]
         def __init__(self, **kwargs):
@@ -58,10 +51,12 @@ def register_rental_tools(mcp: FastMCP, client: BuildiumClient) -> None:
     @mcp.tool()
     async def create_rental(rental_data: dict[str, Any]) -> dict[str, Any]:
         """Create a new rental property."""
-        message = RentalPropertyPostMessage(**rental_data)
-        return await c.execute(
+        return await c.create(
             "create_rental",
-            lambda: client.rentals_api.external_api_rentals_create_rental_property(
+            "rental_property_post_message",
+            "RentalPropertyPostMessage",
+            rental_data,
+            lambda message: client.rentals_api.external_api_rentals_create_rental_property(
                 rental_property_post_message=message
             ),
         )

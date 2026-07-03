@@ -31,6 +31,14 @@ except Exception:  # pragma: no cover - SDK always present in practice
         body: str | None = None
 
 
+try:  # pragma: no cover - pydantic ships with the generated SDK
+    from pydantic import ValidationError
+except Exception:  # pragma: no cover - only hit if pydantic is unavailable
+
+    class ValidationError(ValueError):  # type: ignore[no-redef]
+        """Fallback so ``except ValidationError`` is always valid."""
+
+
 logger = get_logger("mcp_server_buildium.tools")
 
 
@@ -128,19 +136,72 @@ def register_operation(tool_name: str, operation_id: str) -> None:
     }
 
 
-def build_model(module: str, name: str, data: dict[str, Any]) -> Any:
+def _humanize_tool_name(tool_name: str | None) -> str:
+    """Turn a tool name like ``create_rental`` into ``create rental`` for messages."""
+    if not tool_name:
+        return ""
+    return tool_name.replace("_", " ").strip()
+
+
+def _describe_validation_error(exc: ValidationError, resource: str | None) -> str:
+    """Turn a pydantic ``ValidationError`` into a friendly, user-facing prompt.
+
+    The message lists the missing required fields and any invalid fields so the
+    assistant can ask the user for exactly the information Buildium needs to
+    create the object, rather than surfacing a raw pydantic traceback.
+    """
+    missing: list[str] = []
+    invalid: list[str] = []
+    try:
+        errors = exc.errors()
+    except Exception:  # pragma: no cover - defensive; fall back to str(exc)
+        errors = []
+    for err in errors:
+        loc = ".".join(str(part) for part in err.get("loc", ())) or "(root)"
+        if err.get("type") == "missing":
+            missing.append(loc)
+        else:
+            msg = err.get("msg") or "invalid value"
+            invalid.append(f"{loc} ({msg})")
+    details: list[str] = []
+    if missing:
+        details.append("missing required field(s): " + ", ".join(missing))
+    if invalid:
+        details.append("invalid field(s): " + "; ".join(invalid))
+    detail = "; ".join(details) if details else str(exc)
+    action = _humanize_tool_name(resource)
+    prefix = f"Cannot {action}" if action else "Cannot complete the request"
+    return (
+        f"{prefix}: {detail}. "
+        "Please provide the missing or corrected information and try again."
+    )
+
+
+def build_model(module: str, name: str, data: dict[str, Any], *, resource: str | None = None) -> Any:
     """Instantiate an SDK model, falling back to the raw dict if unavailable.
 
     Args:
         module: SDK model module name (e.g. ``rental_unit_post_message``).
         name: Model class name (e.g. ``RentalUnitPostMessage``).
         data: Keyword arguments for the model.
+        resource: Optional tool name (e.g. ``create_rental``) used to phrase a
+            friendly error if the supplied ``data`` fails schema validation.
+
+    Raises:
+        ValueError: If ``data`` is missing required fields or contains invalid
+            values, with a message that prompts the caller for the missing
+            information. :func:`execute` maps this to a ``validation_error``
+            envelope so the assistant can ask the user for more details.
     """
     try:
         mod = __import__(f"mcp_server_buildium.buildium_sdk.models.{module}", fromlist=[name])
-        return getattr(mod, name)(**data)
     except ImportError:  # pragma: no cover - SDK always present in practice
         return data
+    model_cls = getattr(mod, name)
+    try:
+        return model_cls(**data)
+    except ValidationError as exc:
+        raise ValueError(_describe_validation_error(exc, resource)) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -474,3 +535,38 @@ async def execute(
                 code="internal_error",
                 meta=_meta(attempt),
             )
+
+
+async def create(
+    tool_name: str,
+    module: str,
+    name: str,
+    data: dict[str, Any],
+    call: Callable[[Any], Awaitable[Any]],
+    *,
+    meta: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Create a Buildium object from caller-supplied ``data``.
+
+    Builds the strict SDK POST model from ``data`` *inside* :func:`execute` so a
+    schema-validation failure (missing required fields, invalid enum values, ...)
+    is turned into a friendly ``validation_error`` envelope that lists exactly
+    what is missing. The assistant can then ask the user for the additional
+    information instead of surfacing a raw error.
+
+    Args:
+        tool_name: Name of the calling tool (e.g. ``create_rental``); also used
+            to phrase the validation message.
+        module: SDK POST model module name (e.g. ``rental_property_post_message``).
+        name: SDK POST model class name (e.g. ``RentalPropertyPostMessage``).
+        data: Caller-supplied fields for the new object.
+        call: Coroutine factory taking the built model and performing the SDK
+            create request.
+        meta: Optional metadata merged into the response envelope.
+    """
+
+    async def _run() -> Any:
+        message = build_model(module, name, data, resource=tool_name)
+        return await call(message)
+
+    return await execute(tool_name, _run, meta=meta)

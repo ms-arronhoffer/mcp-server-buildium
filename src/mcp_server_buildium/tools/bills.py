@@ -62,10 +62,12 @@ def register_bill_tools(mcp: FastMCP, client: BuildiumClient) -> None:
     @mcp.tool()
     async def create_bill(bill_data: dict[str, Any]) -> dict[str, Any]:
         """Create a new bill."""
-        message = c.build_model("bill_post_message", "BillPostMessage", bill_data)
-        return await c.execute(
+        return await c.create(
             "create_bill",
-            lambda: client.bills_api.external_api_bills_create_bill(bill_post_message=message),
+            "bill_post_message",
+            "BillPostMessage",
+            bill_data,
+            lambda message: client.bills_api.external_api_bills_create_bill(bill_post_message=message),
         )
 
     @mcp.tool()
@@ -112,10 +114,12 @@ def register_bill_tools(mcp: FastMCP, client: BuildiumClient) -> None:
     @mcp.tool()
     async def create_bill_payment(bill_id: int, payment_data: dict[str, Any]) -> dict[str, Any]:
         """Create a payment for a bill."""
-        message = c.build_model("bill_payment_post_message", "BillPaymentPostMessage", payment_data)
-        return await c.execute(
+        return await c.create(
             "create_bill_payment",
-            lambda: client.bills_api.external_api_bill_payments_write_create_bill_payment(
+            "bill_payment_post_message",
+            "BillPaymentPostMessage",
+            payment_data,
+            lambda message: client.bills_api.external_api_bill_payments_write_create_bill_payment(
                 bill_id=bill_id, bill_payment_post_message=message
             ),
         )

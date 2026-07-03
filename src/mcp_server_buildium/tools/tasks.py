@@ -71,12 +71,12 @@ def register_task_tools(mcp: FastMCP, client: BuildiumClient) -> None:
     @mcp.tool()
     async def create_task_category(category_data: dict[str, Any]) -> dict[str, Any]:
         """Create a new task category."""
-        message = c.build_model(
-            "task_category_post_message", "TaskCategoryPostMessage", category_data
-        )
-        return await c.execute(
+        return await c.create(
             "create_task_category",
-            lambda: client.tasks_api.external_api_task_categories_create_task_category(
+            "task_category_post_message",
+            "TaskCategoryPostMessage",
+            category_data,
+            lambda message: client.tasks_api.external_api_task_categories_create_task_category(
                 task_category_post_message=message
             ),
         )

@@ -8,13 +8,8 @@ from ..buildium_client import BuildiumClient
 from . import _common as c
 
 try:
-    from mcp_server_buildium.buildium_sdk.models.lease_post_message import LeasePostMessage
     from mcp_server_buildium.buildium_sdk.models.lease_put_message import LeasePutMessage
 except ImportError:  # pragma: no cover
-
-    class LeasePostMessage:  # type: ignore[no-redef]
-        def __init__(self, **kwargs):
-            self.__dict__.update(kwargs)
 
     class LeasePutMessage:  # type: ignore[no-redef]
         def __init__(self, **kwargs):
@@ -82,10 +77,14 @@ def register_lease_tools(mcp: FastMCP, client: BuildiumClient) -> None:
     @mcp.tool()
     async def create_lease(lease_data: dict[str, Any]) -> dict[str, Any]:
         """Create a new lease."""
-        message = LeasePostMessage(**lease_data)
-        return await c.execute(
+        return await c.create(
             "create_lease",
-            lambda: client.leases_api.external_api_leases_create_lease(lease_post_message=message),
+            "lease_post_message",
+            "LeasePostMessage",
+            lease_data,
+            lambda message: client.leases_api.external_api_leases_create_lease(
+                lease_post_message=message
+            ),
         )
 
     @mcp.tool()

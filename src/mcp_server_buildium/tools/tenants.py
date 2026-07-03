@@ -58,12 +58,12 @@ def register_tenant_tools(mcp: FastMCP, client: BuildiumClient) -> None:
     @mcp.tool()
     async def create_rental_tenant(tenant_data: dict[str, Any]) -> dict[str, Any]:
         """Create a new rental tenant."""
-        message = c.build_model(
-            "rental_tenant_post_message", "RentalTenantPostMessage", tenant_data
-        )
-        return await c.execute(
+        return await c.create(
             "create_rental_tenant",
-            lambda: client.rental_tenants_api.external_api_rental_tenants_create_rental_tenant(
+            "rental_tenant_post_message",
+            "RentalTenantPostMessage",
+            tenant_data,
+            lambda message: client.rental_tenants_api.external_api_rental_tenants_create_rental_tenant(
                 rental_tenant_post_message=message
             ),
         )
@@ -114,12 +114,12 @@ def register_tenant_tools(mcp: FastMCP, client: BuildiumClient) -> None:
     @mcp.tool()
     async def create_association_tenant(tenant_data: dict[str, Any]) -> dict[str, Any]:
         """Create a new association tenant."""
-        message = c.build_model(
-            "association_tenant_post_message", "AssociationTenantPostMessage", tenant_data
-        )
-        return await c.execute(
+        return await c.create(
             "create_association_tenant",
-            lambda: (
+            "association_tenant_post_message",
+            "AssociationTenantPostMessage",
+            tenant_data,
+            lambda message: (
                 client.association_tenants_api.external_api_association_tenants_create_association_tenant(
                     association_tenant_post_message=message
                 )

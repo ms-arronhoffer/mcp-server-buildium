@@ -48,12 +48,12 @@ def register_bank_account_tools(mcp: FastMCP, client: BuildiumClient) -> None:
     @mcp.tool()
     async def create_bank_account(bank_account_data: dict[str, Any]) -> dict[str, Any]:
         """Create a new bank account."""
-        message = c.build_model(
-            "bank_account_post_message", "BankAccountPostMessage", bank_account_data
-        )
-        return await c.execute(
+        return await c.create(
             "create_bank_account",
-            lambda: client.bank_accounts_api.external_api_bank_accounts_create_bank_account(
+            "bank_account_post_message",
+            "BankAccountPostMessage",
+            bank_account_data,
+            lambda message: client.bank_accounts_api.external_api_bank_accounts_create_bank_account(
                 bank_account_post_message=message
             ),
         )
