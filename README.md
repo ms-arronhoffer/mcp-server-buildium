@@ -726,6 +726,14 @@ mcp-server-buildium/
 * [Model Context Protocol](https://modelcontextprotocol.io)
 * [FastMCP Framework](https://github.com/jlowin/fastmcp)
 
+## Browser Extension (Sidebar Chat)
+
+A Manifest V3 Chrome/Firefox extension that provides a full-height side panel chat
+UI (Gemini-style), authenticates users with Microsoft Entra ID, and lets an LLM
+drive Buildium tool calls through this server's HTTP transport, lives in
+[`extension/`](extension/). See [`extension/README.md`](extension/README.md) for
+build, configuration, and Entra app-registration instructions.
+
 ## License
 
 MIT

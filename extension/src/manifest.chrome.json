@@ -1,0 +1,13 @@
+{
+  "permissions": ["storage", "identity", "sidePanel"],
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Open Buildium MCP Sidebar"
+  },
+  "side_panel": {
+    "default_path": "src/sidepanel.html"
+  }
+}
