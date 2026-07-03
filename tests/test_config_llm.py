@@ -77,6 +77,9 @@ def test_dev_auth_bypass_disables_auth() -> None:
 
 def test_default_system_prompt_present() -> None:
     cfg = _cfg()
-    assert "property-management assistant" in cfg.get_llm_system_prompt()
+    prompt = cfg.get_llm_system_prompt()
+    assert "property-management assistant" in prompt
+    # Steers friendly formatting and clickable, drill-down list rows.
+    assert "action:" in prompt
     custom = _cfg(llm_system_prompt="Be terse.")
     assert custom.get_llm_system_prompt() == "Be terse."

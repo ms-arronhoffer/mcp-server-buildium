@@ -12,6 +12,7 @@ import { getApi } from "./browser.js";
 import { getAccessToken, isSignedIn, signIn, signOut } from "./auth.js";
 import { loadConfig, validateConfig } from "./config.js";
 import { ChatClient } from "./llm.js";
+import { renderMarkdown } from "./markdown.js";
 
 const api = getApi();
 
@@ -62,6 +63,17 @@ function addMessage(role, text) {
   els.messages.appendChild(div);
   els.messages.scrollTop = els.messages.scrollHeight;
   return div;
+}
+
+/**
+ * Replace an assistant bubble's contents with rendered Markdown. Clicking an
+ * action link/row sends a follow-up lookup for that specific record.
+ */
+function renderAssistantMarkdown(el, text) {
+  el.textContent = "";
+  el.classList.add("markdown");
+  el.appendChild(renderMarkdown(text, (prompt) => handleSend(prompt)));
+  els.messages.scrollTop = els.messages.scrollHeight;
 }
 
 function addToolMessage(name, argsOrResult, { result = false } = {}) {
@@ -130,7 +142,11 @@ async function handleSend(text) {
       onToolResult: (name, resultText) => addToolMessage(name, resultText, { result: true }),
     });
     const finalText = content || streamed;
-    assistantEl.textContent = finalText || "(no response)";
+    if (finalText) {
+      renderAssistantMarkdown(assistantEl, finalText);
+    } else {
+      assistantEl.textContent = "(no response)";
+    }
     history.push({ role: "assistant", content: finalText });
     setConnection("ok");
   } catch (err) {
