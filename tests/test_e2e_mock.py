@@ -166,3 +166,42 @@ def test_invalid_enum_returns_validation_error(tools, run):
     result = run(tools["list_work_orders"].fn(status="Bogus"))
     assert result["error"] is not None
     assert result["error"]["code"] == "validation_error"
+
+
+def test_list_result_has_timing_meta(tools, run):
+    result = _ok(run(tools["list_rentals"].fn(limit=5)))
+    assert result["meta"] is not None
+    assert "duration_ms" in result["meta"]
+    assert result["meta"]["attempts"] == 1
+
+
+def test_readonly_policy_blocks_mutations_e2e(mock_server, event_loop):
+    """A readonly GuardedMCP must not expose mutating tools, but reads still work."""
+    from fastmcp import FastMCP
+
+    from mcp_server_buildium import audit
+    from mcp_server_buildium.buildium_client import BuildiumClient
+    from mcp_server_buildium.config import BuildiumConfig
+    from mcp_server_buildium.security.policy import ToolPolicy
+    from mcp_server_buildium.security.registration import GuardedMCP
+    from mcp_server_buildium.server import _CATEGORY_REGISTRARS
+
+    client = BuildiumClient(config=BuildiumConfig(base_url=mock_server))
+    guarded = GuardedMCP(
+        FastMCP("e2e-readonly"),
+        ToolPolicy(role="readonly"),
+        audit.AuditRecorder(audit.NullSink()),
+    )
+    for register in _CATEGORY_REGISTRARS.values():
+        register(guarded, client)
+    tool_map = {t.name: t for t in event_loop.run_until_complete(guarded.get_tools()).values()}
+
+    # Reads remain available and functional against the mock.
+    assert "list_leases" in tool_map
+    result = event_loop.run_until_complete(tool_map["list_leases"].fn(limit=5))
+    assert result["error"] is None
+
+    # Mutations are not registered at all.
+    assert "create_lease" not in tool_map
+    assert "update_rental" not in tool_map
+    assert "create_bill" not in tool_map
