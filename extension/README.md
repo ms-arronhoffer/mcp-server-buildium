@@ -2,19 +2,18 @@
 
 A Manifest V3 browser extension (Chrome + Firefox) that renders a **full vertical-height
 side panel chat** — like the Gemini side panel — backed by the
-[Buildium MCP server](../README.md). The assistant is **LLM-driven**: a language model
-holds the conversation and calls the server's Buildium tools as needed. Users sign in with
-**Microsoft Entra ID** (Azure AD); the upstream Buildium API key never touches the browser.
+[Buildium MCP server](../README.md). The assistant is **LLM-driven**, but the language
+model and the tool-calling loop run **server-side**: the extension is a thin client that
+streams chat turns to the server's `/chat` endpoint. Users sign in with **Microsoft Entra
+ID** (Azure AD); neither the upstream Buildium API key nor the LLM provider key ever touches
+the browser.
 
 ```
-┌──────────────┐   Entra access token    ┌──────────────────┐   Buildium API key
-│  Extension   │ ───────────────────────▶│  MCP server      │ ─────────────────▶ Buildium
-│  (side panel)│   Streamable HTTP/MCP    │  (HTTP transport)│   (server-side only)
-│   + LLM      │◀─────────────────────── │  Entra JWT verify│
-└──────────────┘                          └──────────────────┘
-        │  Chat Completions (tools)
-        ▼
-   LLM provider (OpenAI-compatible)
+┌──────────────┐   Entra access token     ┌──────────────────┐   Buildium + LLM keys
+│  Extension   │ ───────────────────────▶ │  MCP server      │ ─────────────────▶ Buildium
+│  (side panel)│   POST /chat (SSE)       │  /chat + tools   │   + LLM provider
+│  thin client │◀──────────────────────── │  Entra JWT verify│   (server-side only)
+└──────────────┘   tokens + tool events   └──────────────────┘
 ```
 
 ## Architecture
@@ -24,8 +23,8 @@ holds the conversation and calls the server's Buildium tools as needed. Users si
 | `src/pkce.js` | OAuth 2.0 PKCE verifier/challenge/state (Web Crypto). Pure. |
 | `src/auth.js` | Entra Authorization Code + PKCE flow, token cache & silent refresh. |
 | `src/mcpClient.js` | MCP Streamable HTTP client (`initialize`, `tools/list`, `tools/call`). |
-| `src/llm.js` | LLM orchestration: advertises MCP tools, runs the tool-calling loop, streams replies. |
-| `src/config.js` | Settings schema, validation, `storage.local` persistence. |
+| `src/llm.js` | `ChatClient`: streams turns to the server `/chat` SSE endpoint (no keys, no tool loop in the browser). |
+| `src/config.js` | Settings schema, validation, `storage.local` persistence, endpoint derivation. |
 | `src/sidepanel.*` | Full-height chat UI (Chrome side panel / Firefox sidebar). |
 | `src/options.*` | Settings page. |
 | `src/background.js` | Opens the side panel on the toolbar action (Chrome). |
@@ -58,12 +57,16 @@ Open the extension's **Settings** (the ⚙ button in the panel, or the extension
 
 | Field | Description |
 | ----- | ----------- |
-| MCP server URL | The server's Streamable HTTP endpoint, e.g. `https://host/mcp`. |
+| MCP server URL | The server's Streamable HTTP endpoint, e.g. `https://host/mcp`. The `/chat` and `/capabilities` endpoints are derived from it. |
 | Entra tenant ID | Your Azure AD tenant GUID (or `common`/`organizations`). |
 | Entra client ID | The **public-client/SPA** app registration ID for *this extension*. |
 | Entra scopes | e.g. `api://<mcp-api-app-id>/MCP.Access`. |
-| LLM API base / model / key | An OpenAI-compatible Chat Completions endpoint. |
-| System prompt | Steers the assistant. |
+| Model (optional) | A model name to request from the server. Must be one the server allows (see its `BUILDIUM_LLM_ALLOWED_MODELS`); leave blank to use the server default. |
+
+> **No provider keys in the browser.** The LLM API base, key, and system prompt are
+> **server-side settings** now — configure them on the MCP server via `BUILDIUM_LLM_*`
+> (see the [server README](../README.md#server-side-llm-assistant-chat)). This is a
+> breaking change from the earlier bring-your-own-key flow.
 
 ### Entra app registrations
 
@@ -89,7 +92,8 @@ npm test                 # unit tests (Vitest)
 ```
 
 An **optional** live integration test runs only when `MCP_TEST_URL` is set (so CI is
-unaffected). Point it at a running server using the dev static-token path:
+unaffected). Point it at a running server using the dev static-token path (or set
+`BUILDIUM_DEV_AUTH_BYPASS=true` on the server to skip auth entirely for local/mock testing):
 
 ```bash
 # from the repo root
@@ -100,8 +104,10 @@ MCP_TEST_URL=http://localhost:8000/mcp MCP_TEST_TOKEN=dev-token npm test -- inte
 
 ## Security notes
 
-* The **Buildium API key stays on the server**; the extension only ever holds a short-lived
-  Entra access token (cached in `storage.session`, cleared on browser close / sign-out).
+* The **Buildium API key and the LLM provider key stay on the server**; the extension only
+  ever holds a short-lived Entra access token (cached in `storage.session`, cleared on
+  browser close / sign-out). The tool-calling loop runs server-side, so no provider key is
+  ever shipped to the browser.
 * PKCE (S256) + a random `state` protect the authorization code exchange.
 * Strict MV3 CSP (`script-src 'self'`); no remote code, no `eval`.
 * Permissions are minimal: `storage`, `identity`, and (Chrome) `sidePanel`.

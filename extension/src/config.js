@@ -2,8 +2,9 @@
  * Extension configuration: defaults, validation, and persistence.
  *
  * Settings are stored in `storage.local` (they are not secrets — tokens live in
- * `storage.session`). The upstream Buildium API key never lives in the browser;
- * it stays server-side behind the MCP server.
+ * `storage.session`). Neither the Buildium API key nor the LLM provider API keys
+ * ever live in the browser: both stay server-side behind the MCP server, which
+ * now also runs the assistant loop and exposes a `/chat` endpoint.
  */
 
 import { getApi } from "./browser.js";
@@ -13,10 +14,7 @@ import { getApi } from "./browser.js";
  * @property {string} entraTenantId  Entra ID tenant GUID (or 'common'/'organizations')
  * @property {string} entraClientId  App registration (public client) ID for THIS extension
  * @property {string} entraScopes    Space-separated scopes to request (e.g. 'api://<api-id>/MCP.Access')
- * @property {string} llmApiBase     Base URL of the OpenAI-compatible chat completions API
- * @property {string} llmModel       Model name to use
- * @property {string} llmApiKey      API key/token for the LLM endpoint (optional if using Entra-protected proxy)
- * @property {string} systemPrompt   System prompt steering the assistant
+ * @property {string} llmModel       Optional model to request (blank = the server's default)
  */
 
 /** @type {ExtensionConfig} */
@@ -25,17 +23,22 @@ export const DEFAULT_CONFIG = {
   entraTenantId: "",
   entraClientId: "",
   entraScopes: "",
-  llmApiBase: "https://api.openai.com/v1",
-  llmModel: "gpt-4o-mini",
-  llmApiKey: "",
-  systemPrompt:
-    "You are a helpful property-management assistant for Buildium. " +
-    "Use the available tools to answer questions and perform actions. " +
-    "Prefer read-only tools unless the user explicitly asks to create or modify data. " +
-    "Always confirm destructive or write operations before calling them.",
+  llmModel: "",
 };
 
 const STORAGE_KEY = "buildium_mcp_config";
+
+/**
+ * Derive a sibling endpoint URL (e.g. the `/chat` or `/capabilities` route) from
+ * the configured MCP endpoint. The server serves these next to the MCP path, so
+ * `https://host/mcp` → `https://host/chat`. Pure function.
+ * @param {string} mcpServerUrl
+ * @param {string} name  the sibling path segment, e.g. 'chat' or 'capabilities'
+ * @returns {string}
+ */
+export function deriveEndpoint(mcpServerUrl, name) {
+  return new URL(name, mcpServerUrl).toString();
+}
 
 /**
  * Validate a configuration object, returning a list of human-readable errors.
@@ -59,9 +62,6 @@ export function validateConfig(cfg) {
   }
   if (!(cfg.entraScopes || "").trim()) {
     errors.push("At least one Entra scope is required.");
-  }
-  if (!(cfg.llmModel || "").trim()) {
-    errors.push("LLM model is required.");
   }
   return errors;
 }

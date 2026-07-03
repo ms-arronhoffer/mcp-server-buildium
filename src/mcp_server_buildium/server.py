@@ -7,6 +7,7 @@ from fastmcp import FastMCP
 from . import audit as audit_mod
 from .auth import build_auth
 from .buildium_client import BuildiumClient
+from .chat_endpoint import register_chat_routes
 from .config import BuildiumConfig
 from .logging_config import configure_logging, get_logger
 from .security.policy import RateLimiter, ToolPolicy
@@ -80,6 +81,13 @@ for _category, _register in _CATEGORY_REGISTRARS.items():
     if config.is_category_enabled(_category):
         _register(mcp, buildium_client)
 
+# Register the server-side assistant HTTP routes (/chat, /capabilities). These are
+# only reachable over the HTTP transport; they run the LLM loop server-side so
+# provider API keys never reach the browser.
+register_chat_routes(mcp, config, auth)
+if config.llm_enabled():
+    logger.info("Server-side assistant enabled (provider=%s)", config.get_llm_provider())
+
 
 @mcp.tool()
 async def health_check() -> dict[str, Any]:
@@ -91,7 +99,9 @@ async def health_check() -> dict[str, Any]:
     leak secret values.
     """
     enabled = config.get_enabled_categories()
-    if config.entra_enabled():
+    if config.dev_auth_bypass:
+        auth_mode = "dev_bypass"
+    elif config.entra_enabled():
         auth_mode = "entra"
     elif config.mcp_auth_token:
         auth_mode = "static_token"
@@ -108,6 +118,8 @@ async def health_check() -> dict[str, Any]:
         "policy": policy.describe(),
         "rate_limit_per_minute": rate_limiter.per_minute,
         "audit_sink": config.audit_sink,
+        "assistant_enabled": config.llm_enabled(),
+        "assistant_provider": config.get_llm_provider(),
     }
     return c.success(data)
 

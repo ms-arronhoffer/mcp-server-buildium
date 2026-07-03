@@ -72,6 +72,13 @@ def build_auth(config: BuildiumConfig) -> TokenVerifier | None:
     Returns:
         A ``TokenVerifier`` instance, or ``None`` when no auth is configured.
     """
+    if config.dev_auth_bypass:
+        logger.warning(
+            "DEV auth bypass enabled (BUILDIUM_DEV_AUTH_BYPASS): all MCP/HTTP "
+            "authentication is DISABLED. Never enable this in production."
+        )
+        return None
+
     if config.entra_enabled():
         return build_entra_verifier(config)
 

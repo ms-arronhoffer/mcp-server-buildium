@@ -1,80 +1,22 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  Agent,
-  applyDelta,
-  flattenMcpContent,
-  newAccumulator,
-  parseChatSseLine,
-  parseToolArguments,
-  toolsToOpenAi,
-} from "../src/llm.js";
+import { ChatClient, parseServerEvent } from "../src/llm.js";
 
-describe("llm pure helpers", () => {
-  it("maps MCP tools to OpenAI function specs", () => {
-    const openai = toolsToOpenAi([
-      { name: "list_leases", description: "List leases", inputSchema: { type: "object" } },
-    ]);
-    expect(openai[0]).toEqual({
-      type: "function",
-      function: {
-        name: "list_leases",
-        description: "List leases",
-        parameters: { type: "object" },
-      },
+describe("parseServerEvent", () => {
+  it("decodes a data event", () => {
+    expect(parseServerEvent('data: {"type":"token","text":"hi"}')).toEqual({
+      type: "token",
+      text: "hi",
     });
   });
 
-  it("provides a default schema when inputSchema is missing", () => {
-    const openai = toolsToOpenAi([{ name: "x" }]);
-    expect(openai[0].function.parameters).toEqual({ type: "object", properties: {} });
-  });
-
-  it("flattens structuredContent", () => {
-    expect(flattenMcpContent({ structuredContent: { a: 1 } })).toBe('{"a":1}');
-  });
-
-  it("flattens text content blocks", () => {
-    const text = flattenMcpContent({
-      content: [
-        { type: "text", text: "line1" },
-        { type: "text", text: "line2" },
-      ],
-    });
-    expect(text).toBe("line1\nline2");
-  });
-
-  it("accumulates streamed content deltas", () => {
-    const acc = newAccumulator();
-    applyDelta(acc, { content: "Hel" });
-    applyDelta(acc, { content: "lo" });
-    expect(acc.content).toBe("Hello");
-  });
-
-  it("accumulates indexed tool-call fragments", () => {
-    const acc = newAccumulator();
-    applyDelta(acc, { tool_calls: [{ index: 0, id: "call_1", function: { name: "list_" } }] });
-    applyDelta(acc, { tool_calls: [{ index: 0, function: { name: "leases", arguments: '{"lim' } }] });
-    applyDelta(acc, { tool_calls: [{ index: 0, function: { arguments: 'it":5}' } }] });
-    expect(acc.toolCalls[0].id).toBe("call_1");
-    expect(acc.toolCalls[0].function.name).toBe("list_leases");
-    expect(acc.toolCalls[0].function.arguments).toBe('{"limit":5}');
-  });
-
-  it("parses chat SSE lines", () => {
-    expect(parseChatSseLine("data: [DONE]")).toBe("[DONE]");
-    expect(parseChatSseLine(": comment")).toBeNull();
-    const delta = parseChatSseLine('data: {"choices":[{"delta":{"content":"hi"}}]}');
-    expect(delta).toEqual({ content: "hi" });
-  });
-
-  it("parses tool arguments, tolerating empty/invalid JSON", () => {
-    expect(parseToolArguments('{"a":1}')).toEqual({ a: 1 });
-    expect(parseToolArguments("")).toEqual({});
-    expect(parseToolArguments("not json")).toEqual({});
+  it("ignores non-data and blank lines", () => {
+    expect(parseServerEvent(": comment")).toBeNull();
+    expect(parseServerEvent("data:")).toBeNull();
+    expect(parseServerEvent("")).toBeNull();
   });
 });
 
-/** Build a fake streaming fetch Response yielding the given SSE text. */
+/** Build a fake streaming fetch Response yielding the given SSE text once. */
 function streamResponse(sseText, { ok = true, status = 200 } = {}) {
   const encoder = new TextEncoder();
   let sent = false;
@@ -96,94 +38,87 @@ function streamResponse(sseText, { ok = true, status = 200 } = {}) {
   };
 }
 
-const baseConfig = {
-  llmApiBase: "https://llm.example/v1",
-  llmModel: "gpt-4o-mini",
-  llmApiKey: "",
-  systemPrompt: "sys",
-};
+const config = { mcpServerUrl: "https://host/mcp", llmModel: "" };
 
-describe("Agent orchestration", () => {
-  it("streams a direct answer with no tool calls", async () => {
-    const mcp = { listTools: async () => [], callTool: vi.fn() };
+describe("ChatClient", () => {
+  it("posts to the derived /chat endpoint with a bearer token", async () => {
+    const fetchMock = vi.fn(async () =>
+      streamResponse('data: {"type":"done","content":"ok"}\n'),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const chat = new ChatClient(config, async () => "tok123");
+    await chat.run([{ role: "user", content: "hi" }]);
+
+    const [url, opts] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://host/chat");
+    expect(opts.headers.Authorization).toBe("Bearer " + "tok123");
+    expect(JSON.parse(opts.body)).toEqual({ messages: [{ role: "user", content: "hi" }] });
+    vi.unstubAllGlobals();
+  });
+
+  it("includes the model only when configured", async () => {
+    const fetchMock = vi.fn(async () => streamResponse('data: {"type":"done","content":"ok"}\n'));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const chat = new ChatClient({ ...config, llmModel: "gpt-4o" }, async () => "t");
+    await chat.run([{ role: "user", content: "hi" }]);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).model).toBe("gpt-4o");
+    vi.unstubAllGlobals();
+  });
+
+  it("streams tokens and returns the final content", async () => {
     const sse =
-      'data: {"choices":[{"delta":{"content":"Hello "}}]}\n' +
-      'data: {"choices":[{"delta":{"content":"world"}}]}\n' +
-      "data: [DONE]\n";
+      'data: {"type":"token","text":"Hello "}\n' +
+      'data: {"type":"token","text":"world"}\n' +
+      'data: {"type":"done","content":"Hello world"}\n';
     vi.stubGlobal("fetch", vi.fn(async () => streamResponse(sse)));
 
     const tokens = [];
-    const agent = new Agent(baseConfig, mcp);
-    const { content } = await agent.run([{ role: "user", content: "hi" }], {
+    const chat = new ChatClient(config, async () => "t");
+    const { content } = await chat.run([{ role: "user", content: "hi" }], {
       onToken: (t) => tokens.push(t),
     });
 
-    expect(content).toBe("Hello world");
     expect(tokens.join("")).toBe("Hello world");
-    expect(mcp.callTool).not.toHaveBeenCalled();
+    expect(content).toBe("Hello world");
     vi.unstubAllGlobals();
   });
 
-  it("executes a tool call then streams the final answer", async () => {
-    const mcp = {
-      listTools: async () => [{ name: "list_leases", inputSchema: { type: "object" } }],
-      callTool: vi.fn(async () => ({ structuredContent: { count: 2 } })),
-    };
+  it("surfaces tool call and result events", async () => {
+    const sse =
+      'data: {"type":"tool_call","name":"list_leases","arguments":{"limit":5}}\n' +
+      'data: {"type":"tool_result","name":"list_leases","text":"{\\"count\\":2}"}\n' +
+      'data: {"type":"done","content":"You have 2 leases."}\n';
+    vi.stubGlobal("fetch", vi.fn(async () => streamResponse(sse)));
 
-    const first =
-      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"list_leases","arguments":"{}"}}]}}]}\n' +
-      "data: [DONE]\n";
-    const second =
-      'data: {"choices":[{"delta":{"content":"You have 2 leases."}}]}\n' + "data: [DONE]\n";
-
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(streamResponse(first))
-      .mockResolvedValueOnce(streamResponse(second));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const toolCalls = [];
-    const toolResults = [];
-    const agent = new Agent(baseConfig, mcp);
-    const { content } = await agent.run([{ role: "user", content: "how many leases?" }], {
-      onToolCall: (name, args) => toolCalls.push([name, args]),
-      onToolResult: (name, text) => toolResults.push([name, text]),
+    const calls = [];
+    const results = [];
+    const chat = new ChatClient(config, async () => "t");
+    const { content } = await chat.run([{ role: "user", content: "how many?" }], {
+      onToolCall: (name, args) => calls.push([name, args]),
+      onToolResult: (name, text) => results.push([name, text]),
     });
 
-    expect(mcp.callTool).toHaveBeenCalledWith("list_leases", {});
-    expect(toolCalls).toEqual([["list_leases", {}]]);
-    expect(toolResults[0][0]).toBe("list_leases");
-    expect(toolResults[0][1]).toBe('{"count":2}');
+    expect(calls).toEqual([["list_leases", { limit: 5 }]]);
+    expect(results).toEqual([["list_leases", '{"count":2}']]);
     expect(content).toBe("You have 2 leases.");
-    expect(fetchMock).toHaveBeenCalledTimes(2);
     vi.unstubAllGlobals();
   });
 
-  it("reports tool errors back to the model instead of throwing", async () => {
-    const mcp = {
-      listTools: async () => [{ name: "boom" }],
-      callTool: vi.fn(async () => {
-        throw new Error("kaboom");
-      }),
-    };
-    const first =
-      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"boom","arguments":"{}"}}]}}]}\n' +
-      "data: [DONE]\n";
-    const second = 'data: {"choices":[{"delta":{"content":"handled"}}]}\n' + "data: [DONE]\n";
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(streamResponse(first))
-      .mockResolvedValueOnce(streamResponse(second));
-    vi.stubGlobal("fetch", fetchMock);
+  it("throws on an error event", async () => {
+    const sse = 'data: {"type":"error","message":"provider down"}\n';
+    vi.stubGlobal("fetch", vi.fn(async () => streamResponse(sse)));
 
-    const toolResults = [];
-    const agent = new Agent(baseConfig, mcp);
-    const { content } = await agent.run([{ role: "user", content: "go" }], {
-      onToolResult: (name, text) => toolResults.push(text),
-    });
+    const chat = new ChatClient(config, async () => "t");
+    await expect(chat.run([{ role: "user", content: "x" }])).rejects.toThrow(/provider down/);
+    vi.unstubAllGlobals();
+  });
 
-    expect(toolResults[0]).toMatch(/kaboom/);
-    expect(content).toBe("handled");
+  it("raises a 401 with a code for expired sessions", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => streamResponse("", { ok: false, status: 401 })));
+    const chat = new ChatClient(config, async () => "t");
+    await expect(chat.run([{ role: "user", content: "x" }])).rejects.toMatchObject({ code: 401 });
     vi.unstubAllGlobals();
   });
 });

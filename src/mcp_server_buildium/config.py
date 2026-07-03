@@ -13,6 +13,9 @@ ROLES = frozenset({"readonly", "operator", "admin", "custom"})
 # Valid audit sink names.
 AUDIT_SINKS = frozenset({"log", "file", "none"})
 
+# Supported server-side LLM providers for the /chat endpoint.
+LLM_PROVIDERS = frozenset({"openai", "anthropic", "gemini"})
+
 # Tool categories supported by the server. Kept here so both the server and
 # validation tooling share a single source of truth.
 ALL_CATEGORIES = frozenset(
@@ -144,6 +147,69 @@ class BuildiumConfig(BaseSettings):
         ),
     )
 
+    # --- Server-side LLM (chat endpoint) -----------------------------------
+    # The optional /chat endpoint runs the assistant loop on the server so that
+    # provider API keys never reach the browser. Keys are read from the
+    # environment/secret store and are never returned by any endpoint.
+    llm_provider: str | None = Field(
+        default=None,
+        description=(
+            "Active LLM provider for the /chat endpoint: 'openai', 'anthropic', or "
+            "'gemini'. When unset, the /chat and /capabilities endpoints report the "
+            "assistant as disabled."
+        ),
+    )
+    llm_model: str | None = Field(
+        default=None,
+        description="Default model name for the active provider (e.g. 'gpt-4o-mini').",
+    )
+    llm_allowed_models: str | None = Field(
+        default=None,
+        description=(
+            "Optional comma-separated allow-list of models a client may request. When "
+            "set, /chat rejects any model not in this list. The default model must be a "
+            "member. When unset, only the default model is permitted."
+        ),
+    )
+    llm_system_prompt: str | None = Field(
+        default=None,
+        description="Optional system prompt steering the assistant (a sensible default is used).",
+    )
+    llm_max_tool_rounds: int = Field(
+        default=8,
+        description="Maximum tool-call rounds per chat turn before the loop stops (>=1).",
+    )
+    llm_openai_api_key: str | None = Field(
+        default=None, description="API key for OpenAI (used when llm_provider='openai')."
+    )
+    llm_anthropic_api_key: str | None = Field(
+        default=None, description="API key for Anthropic (used when llm_provider='anthropic')."
+    )
+    llm_gemini_api_key: str | None = Field(
+        default=None, description="API key for Google Gemini (used when llm_provider='gemini')."
+    )
+    llm_openai_base_url: str = Field(
+        default="https://api.openai.com/v1",
+        description="Base URL for the OpenAI-compatible Chat Completions API.",
+    )
+    llm_anthropic_base_url: str = Field(
+        default="https://api.anthropic.com/v1",
+        description="Base URL for the Anthropic Messages API.",
+    )
+    llm_gemini_base_url: str = Field(
+        default="https://generativelanguage.googleapis.com/v1beta",
+        description="Base URL for the Google Gemini generateContent API.",
+    )
+
+    # --- Development auth bypass -------------------------------------------
+    dev_auth_bypass: bool = Field(
+        default=False,
+        description=(
+            "DEV ONLY: when true, skip all MCP/HTTP authentication (Entra JWT and static "
+            "token) so local/mock testing needs no tokens. NEVER enable in production."
+        ),
+    )
+
     # -- Security guardrails (all optional; defaults preserve prior behavior) --
     role: str = Field(
         default="admin",
@@ -239,7 +305,34 @@ class BuildiumConfig(BaseSettings):
             raise ValueError("BUILDIUM_AUDIT_SINK=file requires BUILDIUM_AUDIT_FILE to be set")
         if self.rate_limit_per_minute < 0:
             raise ValueError("BUILDIUM_RATE_LIMIT_PER_MINUTE must be >= 0")
+        self._validate_llm()
         return self
+
+    def _validate_llm(self) -> None:
+        """Validate the optional server-side LLM configuration."""
+        if self.llm_provider is None:
+            return
+        provider = self.llm_provider.strip().lower()
+        if provider not in LLM_PROVIDERS:
+            raise ValueError(
+                f"Unknown BUILDIUM_LLM_PROVIDER: {self.llm_provider!r}. "
+                f"Valid providers: {sorted(LLM_PROVIDERS)}"
+            )
+        if not (self.llm_model and self.llm_model.strip()):
+            raise ValueError("BUILDIUM_LLM_MODEL is required when BUILDIUM_LLM_PROVIDER is set")
+        if not (self.get_active_llm_key() or "").strip():
+            raise ValueError(
+                f"An API key is required for provider {provider!r} "
+                f"(set BUILDIUM_LLM_{provider.upper()}_API_KEY)"
+            )
+        allowed = self.get_llm_allowed_models()
+        if allowed is not None and self.llm_model.strip() not in allowed:
+            raise ValueError(
+                f"BUILDIUM_LLM_MODEL {self.llm_model.strip()!r} must be a member of "
+                f"BUILDIUM_LLM_ALLOWED_MODELS: {allowed}"
+            )
+        if self.llm_max_tool_rounds < 1:
+            raise ValueError("BUILDIUM_LLM_MAX_TOOL_ROUNDS must be >= 1")
 
     @classmethod
     def from_env(cls) -> "BuildiumConfig":
@@ -303,3 +396,59 @@ class BuildiumConfig(BaseSettings):
             return None
         origins = [o.strip() for o in self.cors_allow_origins.split(",") if o.strip()]
         return origins or None
+
+    # --- LLM helpers -------------------------------------------------------
+    def llm_enabled(self) -> bool:
+        """Return True when a server-side LLM provider is configured."""
+        return bool(self.llm_provider and self.llm_provider.strip())
+
+    def get_llm_provider(self) -> str | None:
+        """Return the normalized (lower-case) active provider name, or None."""
+        if not self.llm_enabled():
+            return None
+        return self.llm_provider.strip().lower()
+
+    def get_active_llm_key(self) -> str | None:
+        """Return the API key for the active provider (never logged/returned to clients)."""
+        return {
+            "openai": self.llm_openai_api_key,
+            "anthropic": self.llm_anthropic_api_key,
+            "gemini": self.llm_gemini_api_key,
+        }.get(self.get_llm_provider() or "")
+
+    def get_llm_base_url(self) -> str | None:
+        """Return the base URL for the active provider."""
+        return {
+            "openai": self.llm_openai_base_url,
+            "anthropic": self.llm_anthropic_base_url,
+            "gemini": self.llm_gemini_base_url,
+        }.get(self.get_llm_provider() or "")
+
+    def get_llm_allowed_models(self) -> list[str] | None:
+        """Return the model allow-list as a list, or None when unset."""
+        if not self.llm_allowed_models:
+            return None
+        models = [m.strip() for m in self.llm_allowed_models.split(",") if m.strip()]
+        return models or None
+
+    def get_llm_models(self) -> list[str]:
+        """Return the models a client may select (allow-list, else just the default)."""
+        allowed = self.get_llm_allowed_models()
+        if allowed is not None:
+            return allowed
+        return [self.llm_model] if self.llm_model else []
+
+    def is_llm_model_allowed(self, model: str) -> bool:
+        """Return True when ``model`` is permitted for client selection."""
+        return model in self.get_llm_models()
+
+    def get_llm_system_prompt(self) -> str:
+        """Return the system prompt for the assistant (default when unset)."""
+        if self.llm_system_prompt and self.llm_system_prompt.strip():
+            return self.llm_system_prompt
+        return (
+            "You are a helpful property-management assistant for Buildium. "
+            "Use the available tools to answer questions and perform actions. "
+            "Prefer read-only tools unless the user explicitly asks to create or modify data. "
+            "Always confirm destructive or write operations before calling them."
+        )

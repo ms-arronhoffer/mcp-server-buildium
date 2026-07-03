@@ -5,16 +5,7 @@ import { DEFAULT_CONFIG, loadConfig, saveConfig, validateConfig } from "./config
 
 const api = getApi();
 
-const FIELDS = [
-  "mcpServerUrl",
-  "entraTenantId",
-  "entraClientId",
-  "entraScopes",
-  "llmApiBase",
-  "llmModel",
-  "llmApiKey",
-  "systemPrompt",
-];
+const FIELDS = ["mcpServerUrl", "entraTenantId", "entraClientId", "entraScopes", "llmModel"];
 
 function el(id) {
   return document.getElementById(id);

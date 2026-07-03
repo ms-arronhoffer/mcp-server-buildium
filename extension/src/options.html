@@ -11,7 +11,8 @@
       <h1>Buildium MCP Sidebar — Settings</h1>
       <p class="hint">
         Configure the MCP server endpoint and Microsoft Entra ID sign-in. The
-        Buildium API key stays on the server and is never entered here.
+        Buildium API key and the language-model provider key both stay on the
+        server and are never entered here.
       </p>
 
       <form id="settings-form">
@@ -40,17 +41,12 @@
 
         <fieldset>
           <legend>Language model</legend>
-          <label for="llmApiBase">API base URL (OpenAI-compatible)</label>
-          <input id="llmApiBase" type="url" placeholder="https://api.openai.com/v1" />
-
-          <label for="llmModel">Model</label>
-          <input id="llmModel" type="text" placeholder="gpt-4o-mini" />
-
-          <label for="llmApiKey">API key (optional if using an Entra-protected proxy)</label>
-          <input id="llmApiKey" type="password" placeholder="sk-…" autocomplete="off" />
-
-          <label for="systemPrompt">System prompt</label>
-          <textarea id="systemPrompt" rows="4"></textarea>
+          <label for="llmModel">Model (optional)</label>
+          <input id="llmModel" type="text" placeholder="server default" />
+          <p class="hint">
+            The provider and API key are configured on the server. Leave blank to
+            use the server's default model, or enter a model the server permits.
+          </p>
         </fieldset>
 
         <div class="row">

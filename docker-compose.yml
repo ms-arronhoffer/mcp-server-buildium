@@ -70,7 +70,21 @@ services:
       # Allow the browser extension origin(s). Replace with your extension ID,
       # or use a dev/static token instead of Entra for local testing.
       BUILDIUM_CORS_ALLOW_ORIGINS: "*"
-      # Microsoft Entra ID JWT auth (uncomment and fill in for real auth):
+      # Dev auth bypass: skip ALL auth so the extension can hit /mcp and /chat
+      # without an Entra tenant/token. NON-PRODUCTION ONLY.
+      BUILDIUM_DEV_AUTH_BYPASS: "true"
+      # --- Server-side LLM assistant (keys stay server-side) ----------------
+      # Uncomment a provider + its key to enable the /chat + /capabilities
+      # endpoints. Keys are read here (from host env or a secrets file) and are
+      # never sent to the browser extension.
+      # BUILDIUM_LLM_PROVIDER: "openai"
+      # BUILDIUM_LLM_MODEL: "gpt-4o-mini"
+      # BUILDIUM_LLM_ALLOWED_MODELS: "gpt-4o-mini,gpt-4o"
+      # BUILDIUM_LLM_OPENAI_API_KEY: "${BUILDIUM_LLM_OPENAI_API_KEY}"
+      # BUILDIUM_LLM_ANTHROPIC_API_KEY: "${BUILDIUM_LLM_ANTHROPIC_API_KEY}"
+      # BUILDIUM_LLM_GEMINI_API_KEY: "${BUILDIUM_LLM_GEMINI_API_KEY}"
+      # Microsoft Entra ID JWT auth (uncomment and fill in for real auth;
+      # remove BUILDIUM_DEV_AUTH_BYPASS above when enabling this):
       # BUILDIUM_ENTRA_TENANT_ID: "00000000-0000-0000-0000-000000000000"
       # BUILDIUM_ENTRA_AUDIENCE: "api://<api-app-client-id>"
       # BUILDIUM_ENTRA_REQUIRED_SCOPES: "MCP.Access"
