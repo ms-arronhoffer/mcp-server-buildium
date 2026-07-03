@@ -639,6 +639,9 @@ def _pptx_theme() -> str:
 # ---------------------------------------------------------------------------
 # PDF
 # ---------------------------------------------------------------------------
+# Line/character budget for the fixed-width Helvetica text PDF. A US-Letter page
+# (612pt) with ~11pt Helvetica fits roughly 95 characters and ~52 lines; longer
+# text is wrapped and paginated accordingly.
 _PDF_LINES_PER_PAGE = 52
 _PDF_MAX_CHARS_PER_LINE = 95
 

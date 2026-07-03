@@ -221,7 +221,8 @@ async function handleSend(text) {
     if (finalText) {
       renderAssistantMarkdown(assistantEl, finalText);
     } else if (artifacts && artifacts.length > 0) {
-      assistantEl.textContent = "Here is your file:";
+      assistantEl.textContent =
+        artifacts.length > 1 ? "Here are your files:" : "Here is your file:";
     } else {
       assistantEl.textContent = "(no response)";
     }
