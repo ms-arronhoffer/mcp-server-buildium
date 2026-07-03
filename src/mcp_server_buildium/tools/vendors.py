@@ -9,6 +9,12 @@ from . import _common as c
 
 VENDOR_STATUSES = {"Active", "Inactive"}
 
+# Buildium GET returns the vendor's category as a lookup object (``{"Id": 1, "Name": "..."}``)
+# and phone numbers as a list, but the create/update messages want ``CategoryId``
+# and a keyed ``PhoneNumbers`` object. These map the GET shape onto the POST/PUT
+# shape so a caller can reuse the record it just read (see _common.reshape_input).
+_VENDOR_LOOKUP_IDS = {"Category": "CategoryId"}
+
 
 def register_vendor_tools(mcp: FastMCP, client: BuildiumClient) -> None:
     """Register vendor-related tools with the MCP server."""
@@ -55,7 +61,16 @@ def register_vendor_tools(mcp: FastMCP, client: BuildiumClient) -> None:
 
     @mcp.tool()
     async def create_vendor(vendor_data: dict[str, Any]) -> dict[str, Any]:
-        """Create a new vendor."""
+        """Create a new vendor.
+
+        ``vendor_data`` may reuse the shape a GET returns: a ``Category`` lookup
+        object (``{"Id": 1}``) is accepted in place of ``CategoryId``, and phone
+        numbers may be supplied either as the keyed object form
+        (``{"phone_numbers": {"mobile": "..."}}``) or the GET-style list.
+        """
+        vendor_data = c.reshape_input(
+            vendor_data, reshape_phones=True, lookup_ids=_VENDOR_LOOKUP_IDS
+        )
         return await c.create(
             "create_vendor",
             "vendor_post_message",
@@ -74,13 +89,17 @@ def register_vendor_tools(mcp: FastMCP, client: BuildiumClient) -> None:
         vendor is fetched first to supply required fields so partial edits
         succeed without a full schema. Keys may use JSON aliases or field names,
         and phone numbers use the keyed object form, e.g.
-        ``{"phone_numbers": {"mobile": "555-555-5555"}}``.
+        ``{"phone_numbers": {"mobile": "555-555-5555"}}``. The category may be
+        given as ``{"category_id": 1}`` or a ``{"Category": {"Id": 1}}`` lookup
+        object; if omitted, the vendor's existing category is preserved.
         """
 
         async def _do_update() -> Any:
             api = client.vendors_api
             current = await api.external_api_vendors_get_vendor_by_id(vendor_id=vendor_id)
-            merged = c.merge_update(current, vendor_data, reshape_phones=True)
+            merged = c.merge_update(
+                current, vendor_data, reshape_phones=True, lookup_ids=_VENDOR_LOOKUP_IDS
+            )
             message = c.build_model("vendor_put_message", "VendorPutMessage", merged)
             return await api.external_api_vendors_update_vendor(
                 vendor_id=vendor_id, vendor_put_message=message

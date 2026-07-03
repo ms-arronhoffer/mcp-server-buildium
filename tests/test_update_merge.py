@@ -40,6 +40,35 @@ class _FakeModel:
         return self._doc
 
 
+def test_reshape_lookup_ids_converts_lookup_object() -> None:
+    data = {"Category": {"Id": 1, "Name": "Plumbing"}, "CompanyName": "Bob"}
+    assert c.reshape_lookup_ids(data, {"Category": "CategoryId"}) == {
+        "CategoryId": 1,
+        "CompanyName": "Bob",
+    }
+
+
+def test_reshape_lookup_ids_keeps_explicit_id() -> None:
+    # An explicit CategoryId already supplied wins over the lookup object.
+    data = {"Category": {"Id": 1}, "CategoryId": 9}
+    assert c.reshape_lookup_ids(data, {"Category": "CategoryId"}) == {"CategoryId": 9}
+
+
+def test_reshape_input_normalizes_phone_list_and_lookup() -> None:
+    data = {
+        "Category": {"Id": 2},
+        "PhoneNumbers": [{"Number": "555-000-1111", "Type": "Cell"}],
+    }
+    out = c.reshape_input(data, reshape_phones=True, lookup_ids={"Category": "CategoryId"})
+    assert out == {"CategoryId": 2, "PhoneNumbers": {"mobile": "555-000-1111"}}
+
+
+def test_get_to_put_base_reshapes_lookup_object() -> None:
+    current = _FakeModel({"Category": {"Id": 3, "Name": "HVAC"}, "CompanyName": "Bob"})
+    base = c.get_to_put_base(current, lookup_ids={"Category": "CategoryId"})
+    assert base == {"CategoryId": 3, "CompanyName": "Bob"}
+
+
 def test_get_to_put_base_preserves_alias_keys() -> None:
     current = _FakeModel({"Id": 1, "Name": "x", "Nested": {"AddressLine1": "a"}})
     base = c.get_to_put_base(current)
@@ -152,8 +181,17 @@ async def test_update_rental_owner_partial_phone() -> None:
 
 @pytest.mark.asyncio
 async def test_update_vendor_partial_field_preserves_required() -> None:
+    # Buildium GET exposes the category as a lookup object; the PUT message wants
+    # ``CategoryId``, so an untouched update must preserve it without the caller
+    # having to re-supply it.
     api = _FakeApi(
-        {"Id": 2, "FirstName": "Bob", "LastName": "Smith", "IsCompany": False, "CategoryId": 3},
+        {
+            "Id": 2,
+            "FirstName": "Bob",
+            "LastName": "Smith",
+            "IsCompany": False,
+            "Category": {"Id": 3, "Name": "Plumbing"},
+        },
         "external_api_vendors_get_vendor_by_id",
         "external_api_vendors_update_vendor",
     )
@@ -167,6 +205,66 @@ async def test_update_vendor_partial_field_preserves_required() -> None:
     assert sent["FirstName"] == "Robert"
     assert sent["LastName"] == "Smith"
     assert sent["CategoryId"] == 3
+
+
+@pytest.mark.asyncio
+async def test_update_vendor_reshapes_category_and_phone_patch() -> None:
+    # A caller that reuses the GET shape (Category lookup object, phone-number
+    # list) still resolves to the CategoryId / keyed PhoneNumbers the PUT wants.
+    api = _FakeApi(
+        {
+            "Id": 2,
+            "IsCompany": True,
+            "CompanyName": "Bob's Plumbing",
+            "Category": {"Id": 3, "Name": "Plumbing"},
+            "PhoneNumbers": [{"Number": "555-000-1111", "Type": "Cell"}],
+        },
+        "external_api_vendors_get_vendor_by_id",
+        "external_api_vendors_update_vendor",
+    )
+    client = _FakeClient(vendors_api=api)
+    tool = await _get_tool(register_vendor_tools, client, "update_vendor")
+
+    result = await tool.fn(
+        vendor_id=2,
+        vendor_data={
+            "Category": {"Id": 8},
+            "PhoneNumbers": [{"Number": "555-222-3333", "Type": "Office"}],
+        },
+    )
+
+    assert result["error"] is None
+    sent = api.received.to_dict()
+    assert sent["CategoryId"] == 8
+    assert sent["PhoneNumbers"] == {"Work": "555-222-3333", "Mobile": "555-000-1111"}
+
+
+@pytest.mark.asyncio
+async def test_create_vendor_reshapes_category_and_phone() -> None:
+    captured: dict[str, Any] = {}
+
+    class _CreateApi:
+        async def external_api_vendors_create_vendor(self, *, vendor_post_message: Any) -> Any:
+            captured["message"] = vendor_post_message
+            return vendor_post_message
+
+    client = _FakeClient(vendors_api=_CreateApi())
+    tool = await _get_tool(register_vendor_tools, client, "create_vendor")
+
+    result = await tool.fn(
+        vendor_data={
+            "IsCompany": True,
+            "CompanyName": "Bob's Plumbing",
+            "Category": {"Id": 1, "Name": "Plumbing"},
+            "PhoneNumbers": [{"Number": "555-000-1111", "Type": "Cell"}],
+        }
+    )
+
+    assert result["error"] is None
+    sent = captured["message"].to_dict()
+    assert sent["CategoryId"] == 1
+    assert sent["PhoneNumbers"] == {"Mobile": "555-000-1111"}
+    assert sent["CompanyName"] == "Bob's Plumbing"
 
 
 @pytest.mark.asyncio

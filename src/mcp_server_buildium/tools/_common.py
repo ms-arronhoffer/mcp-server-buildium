@@ -293,7 +293,83 @@ def phone_list_to_object(phones: Any) -> dict[str, str]:
     return result
 
 
-def get_to_put_base(current: Any, *, reshape_phones: bool = False) -> dict[str, Any]:
+def lookup_object_to_id(value: Any) -> Any:
+    """Extract the ``Id`` from a GET-style lookup object (``{Id, Name, ...}``).
+
+    Buildium GET endpoints expose foreign keys as nested lookup objects such as
+    ``{"Id": 1, "Name": "Plumbing"}``, but the matching create/update messages
+    want the bare identifier (e.g. ``CategoryId``). Returns ``None`` when no
+    ``Id`` key is present so the caller can decide to drop the field.
+    """
+    if isinstance(value, dict):
+        for key, inner in value.items():
+            if to_snake_key(str(key)) == "id":
+                return inner
+    return None
+
+
+def reshape_lookup_ids(data: Any, lookup_ids: dict[str, str]) -> dict[str, Any]:
+    """Replace GET-style lookup objects with their PUT ``<Name>Id`` scalar.
+
+    ``lookup_ids`` maps a GET lookup key (e.g. ``"Category"``) to the target id
+    alias the PUT/POST message expects (e.g. ``"CategoryId"``). Matching on the
+    source key is case-insensitive (snake_case) so either the PascalCase alias
+    or the snake_case field name is accepted. A lookup value that is a dict is
+    reduced to its ``Id``; a scalar is used as-is; ``None`` drops the field. An
+    explicit ``<Name>Id`` already present in ``data`` is left untouched.
+    """
+    if not isinstance(data, dict) or not lookup_ids:
+        return data if isinstance(data, dict) else {}
+    targets = {to_snake_key(src): put for src, put in lookup_ids.items()}
+    result = dict(data)
+    for key in list(result):
+        put_alias = targets.get(to_snake_key(str(key)))
+        if put_alias is None:
+            continue
+        value = result.pop(key)
+        ident = lookup_object_to_id(value) if isinstance(value, dict) else value
+        if ident is not None and not any(
+            to_snake_key(str(k)) == to_snake_key(put_alias) for k in result
+        ):
+            result[put_alias] = ident
+    return result
+
+
+def reshape_input(
+    data: Any,
+    *,
+    reshape_phones: bool = False,
+    lookup_ids: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Normalize caller-supplied data from GET shapes into POST/PUT shapes.
+
+    The assistant frequently reuses the shape a GET returned, so a create/update
+    payload may carry a ``PhoneNumbers`` *list* or a ``Category`` lookup object
+    that the strict POST/PUT model rejects. This converts a phone-number list
+    into the keyed object form (when ``reshape_phones`` is set) and any
+    ``lookup_ids`` foreign-key lookup objects into their ``<Name>Id`` scalar.
+    """
+    if not isinstance(data, dict):
+        return {}
+    result = dict(data)
+    if reshape_phones:
+        for key in list(result):
+            if to_snake_key(str(key)) == "phone_numbers" and isinstance(result[key], list):
+                phones = phone_list_to_object(result.pop(key))
+                if phones:
+                    result["PhoneNumbers"] = phones
+                break
+    if lookup_ids:
+        result = reshape_lookup_ids(result, lookup_ids)
+    return result
+
+
+def get_to_put_base(
+    current: Any,
+    *,
+    reshape_phones: bool = False,
+    lookup_ids: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """Build a PUT-shaped dict from a fetched record, preserving alias keys.
 
     Generated PUT models frequently require fields (e.g. ``FirstName``,
@@ -304,7 +380,10 @@ def get_to_put_base(current: Any, *, reshape_phones: bool = False) -> dict[str, 
     not dropped. Read-only fields (``id``, timestamps, ...) are carried along but
     ignored by the target model. When ``reshape_phones`` is set, the GET-style
     phone-number list is converted into the keyed object form the PUT message
-    expects (see :func:`phone_list_to_object`).
+    expects (see :func:`phone_list_to_object`). When ``lookup_ids`` is given, the
+    GET-style foreign-key lookup objects it names are reduced to their
+    ``<Name>Id`` scalar (see :func:`reshape_lookup_ids`) so a partial update does
+    not have to re-supply a required id the record already carries.
     """
     raw = current.to_dict() if hasattr(current, "to_dict") else dict(current or {})
     if not isinstance(raw, dict):
@@ -317,6 +396,8 @@ def get_to_put_base(current: Any, *, reshape_phones: bool = False) -> dict[str, 
                 if phones:
                     base["PhoneNumbers"] = phones
                 break
+    if lookup_ids:
+        base = reshape_lookup_ids(base, lookup_ids)
     return base
 
 
@@ -343,17 +424,27 @@ def _merge_normalized(base: Any, patch: Any) -> Any:
     return patch
 
 
-def merge_update(current: Any, patch: Any, *, reshape_phones: bool = False) -> dict[str, Any]:
+def merge_update(
+    current: Any,
+    patch: Any,
+    *,
+    reshape_phones: bool = False,
+    lookup_ids: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """Merge a caller-supplied partial ``patch`` onto a fetched record.
 
     The fetched ``current`` record is reshaped into a PUT base (see
     :func:`get_to_put_base`) and ``patch`` is deep-merged on top, so single-field
     edits succeed without resupplying the full strict schema. Patch keys may use
     either the PascalCase JSON aliases or the snake_case field names
-    interchangeably (see :func:`_merge_normalized`).
+    interchangeably (see :func:`_merge_normalized`). ``reshape_phones`` and
+    ``lookup_ids`` are also applied to ``patch`` so a caller that reuses the
+    GET shape (a phone-number list, a ``Category`` lookup object) still resolves
+    to the keyed/scalar form the PUT model expects.
     """
-    base = get_to_put_base(current, reshape_phones=reshape_phones)
-    return _merge_normalized(base, patch)
+    base = get_to_put_base(current, reshape_phones=reshape_phones, lookup_ids=lookup_ids)
+    normalized_patch = reshape_input(patch, reshape_phones=reshape_phones, lookup_ids=lookup_ids)
+    return _merge_normalized(base, normalized_patch)
 
 
 # ---------------------------------------------------------------------------
