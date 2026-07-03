@@ -40,6 +40,10 @@ ALL_CATEGORIES = frozenset(
         "general_ledger",
         "work_orders",
         "documents",
+        "ownership_accounts",
+        "communications",
+        "budgets",
+        "reference",
     }
 )
 

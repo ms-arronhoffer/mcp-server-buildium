@@ -18,11 +18,15 @@ from .tools.applicants import register_applicant_tools
 from .tools.associations import register_association_tools
 from .tools.bank_accounts import register_bank_account_tools
 from .tools.bills import register_bill_tools
+from .tools.budgets import register_budget_tools
+from .tools.communications import register_communication_tools
 from .tools.documents import register_document_tools
 from .tools.files import register_file_tools
 from .tools.general_ledger import register_general_ledger_tools
 from .tools.leases import register_lease_tools
 from .tools.owners import register_owner_tools
+from .tools.ownership_accounts import register_ownership_account_tools
+from .tools.reference import register_reference_tools
 from .tools.rentals import register_rental_tools
 from .tools.tasks import register_task_tools
 from .tools.tenants import register_tenant_tools
@@ -86,6 +90,10 @@ _CATEGORY_REGISTRARS = {
     "general_ledger": register_general_ledger_tools,
     "work_orders": register_work_order_tools,
     "documents": register_document_tools,
+    "ownership_accounts": register_ownership_account_tools,
+    "communications": register_communication_tools,
+    "budgets": register_budget_tools,
+    "reference": register_reference_tools,
 }
 
 for _category, _register in _CATEGORY_REGISTRARS.items():

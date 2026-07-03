@@ -79,6 +79,8 @@ def test_every_registered_tool_is_mapped_or_local(
         "list_uploaded_documents",
         "create_download_file",
         "save_uploaded_document",
+        "get_reference_data",
+        "lease_receivables_summary",
     }
     unmapped = set(registered_tool_names) - set(tool_operations) - server_local
     assert not unmapped, f"Tools with no operation mapping: {sorted(unmapped)}"

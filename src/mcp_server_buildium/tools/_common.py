@@ -95,12 +95,19 @@ _READ_PREFIXES = ("list_", "get_")
 _WRITE_PREFIXES = ("create_", "update_", "delete_")
 
 # Substrings that mark a tool as financially sensitive (bills, bank accounts,
-# general ledger, payments, and file up/download URL issuance).
+# general ledger, payments, charges/credits/refunds, budgets, and file
+# up/download URL issuance).
 _SENSITIVE_MARKERS = (
     "bill",
     "bank_account",
     "gl_",
     "payment",
+    "charge",
+    "credit",
+    "refund",
+    "ledger",
+    "outstanding_balance",
+    "budget",
     "file_download",
     "file_upload",
 )
@@ -189,13 +196,12 @@ def _describe_validation_error(exc: ValidationError, resource: str | None) -> st
     detail = "; ".join(details) if details else str(exc)
     action = _humanize_tool_name(resource)
     prefix = f"Cannot {action}" if action else "Cannot complete the request"
-    return (
-        f"{prefix}: {detail}. "
-        "Please provide the missing or corrected information and try again."
-    )
+    return f"{prefix}: {detail}. Please provide the missing or corrected information and try again."
 
 
-def build_model(module: str, name: str, data: dict[str, Any], *, resource: str | None = None) -> Any:
+def build_model(
+    module: str, name: str, data: dict[str, Any], *, resource: str | None = None
+) -> Any:
     """Instantiate an SDK model, falling back to the raw dict if unavailable.
 
     Args:
@@ -543,6 +549,52 @@ def validate_enum(value: str | None, allowed: set[str], *, field: str) -> str | 
     if value not in allowed:
         raise ValueError(f"Invalid {field}: {value!r}. Allowed values: {sorted(allowed)}")
     return value
+
+
+# Hard ceiling on the number of records auto-pagination will accumulate so a tool
+# can never fan out into an unbounded number of upstream requests. Overridable
+# via env for operators who need larger result sets.
+MAX_FETCH_ALL_RECORDS = _env_int("BUILDIUM_MAX_FETCH_ALL_RECORDS", 5000)
+
+
+async def paginate_all(
+    fetch_page: Callable[[int, int], Awaitable[Any]],
+    *,
+    page_size: int | None = None,
+    max_records: int | None = None,
+) -> list[Any]:
+    """Accumulate every page of a Buildium list endpoint into a single list.
+
+    Buildium list endpoints page with ``limit``/``offset`` and silently return
+    only the first page when the caller forgets to paginate, which makes an LLM
+    answer questions from a truncated view. This walks the pages for the caller,
+    stopping when a short page is returned (no more data) or the bounded
+    ``max_records`` ceiling is reached, so a "fetch everything" request is both
+    complete and safe.
+
+    Args:
+        fetch_page: Coroutine factory taking ``(limit, offset)`` and returning
+            the SDK page (a list, or a model whose ``to_dict`` is a list).
+        page_size: Records to request per page (clamped to Buildium's range).
+        max_records: Optional cap on total accumulated records; defaults to
+            :data:`MAX_FETCH_ALL_RECORDS`.
+
+    Returns:
+        The serialized records from every page, concatenated in order.
+    """
+    size = MAX_LIMIT if page_size is None else clamp_pagination(page_size, 0)[0]
+    ceiling = MAX_FETCH_ALL_RECORDS if max_records is None else max(1, int(max_records))
+    records: list[Any] = []
+    offset = 0
+    while len(records) < ceiling:
+        page = _serialize(await fetch_page(size, offset))
+        if not isinstance(page, list):
+            page = [] if page is None else [page]
+        records.extend(page)
+        if len(page) < size:
+            break
+        offset += size
+    return records[:ceiling]
 
 
 # ---------------------------------------------------------------------------

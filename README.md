@@ -11,7 +11,7 @@
 ## Features
 
 * 🔐 **API Key Authentication** - Secure server-to-server authentication via headers
-* 🏘️ **90 Tools Across 14 Categories** - Comprehensive property management coverage
+* 🏘️ **155 Tools Across 19 Categories** - Comprehensive property management coverage
 * 📋 **Selective Tool Loading** - Enable only the categories you need
 * 🛡️ **Roles & Guardrails** - Read-only mode, RBAC roles, allow/deny lists, rate limiting
 * 🧾 **Audit Trail** - Structured, redacted audit events with pluggable sinks and reporting
@@ -67,23 +67,28 @@ Control which tool categories are enabled using the `BUILDIUM_CATEGORIES` enviro
 | Category | Tools | Description |
 |----------|-------|-------------|
 | `associations` | 6 | Homeowner association management |
-| `leases` | 6 | Lease agreements and transactions |
+| `leases` | 18 | Lease agreements plus the full lease ledger (charges, payments, credits, refunds, recurring, outstanding balances) |
 | `rentals` | 5 | Rental properties and listings |
 | `applicants` | 10 | Rental applicants and applications |
 | `tenants` | 7 | Tenant management (rental & association) |
 | `owners` | 8 | Property owner management |
 | `units` | 7 | Individual unit management |
 | `vendors` | 7 | Vendor and service provider management |
-| `tasks` | 5 | Task and to-do management |
+| `tasks` | 24 | Task management, task history, and typed task requests (contact/to-do/resident/rental-owner) |
 | `bills` | 7 | Bill and payment management |
 | `files` | 8 | Document and file management |
 | `bank_accounts` | 6 | Bank account and transaction management |
 | `general_ledger` | 4 | General ledger accounts and transactions |
 | `work_orders` | 4 | Work order management |
+| `documents` | 4 | Document generation and downloadable file creation |
+| `ownership_accounts` | 11 | Association ownership-account ledger (charges, payments, credits, refunds, outstanding balances) |
+| `communications` | 14 | Announcements, emails, phone logs, and mailing templates |
+| `budgets` | 4 | Budget planning (create/update/get/list) |
+| `reference` | 1 | Reference-data vocabularies for enum fields (also exposed as MCP resources) |
 
-**Total: 90 category tools + built-in `health_check` and `audit_summary` tools (92 total).**
+**Total: 155 category tools + built-in `health_check` and `audit_summary` tools (157 total).**
 
-If `BUILDIUM_CATEGORIES` is not set, all 90 tools across all 14 categories are enabled.
+If `BUILDIUM_CATEGORIES` is not set, all 155 tools across all 19 categories are enabled.
 
 ### Security, Roles & Audit
 
@@ -342,10 +347,10 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 }
 ```
 
-## Available Tools (90 category tools)
+## Available Tools (155 category tools)
 
-> In addition to the 90 category tools below, the server exposes two built-in
-> tools: `health_check` and `audit_summary` (admin-only), for a total of 92.
+> In addition to the 155 category tools below, the server exposes two built-in
+> tools: `health_check` and `audit_summary` (admin-only), for a total of 157.
 
 ### Associations (6 tools)
 * `list_associations` - List all associations
@@ -355,13 +360,25 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 * `list_association_board_members` - List board members for an association
 * `list_association_ownership_accounts` - List ownership accounts for an association
 
-### Leases (6 tools)
+### Leases (18 tools)
 * `list_leases` - List leases with optional filters
 * `get_lease` - Get lease details by ID
 * `create_lease` - Create a new lease
 * `update_lease` - Update an existing lease
 * `list_lease_transactions` - List transactions for a lease
 * `get_lease_transaction` - Get a lease ledger transaction by ID
+* `list_lease_charges` - List charges on a lease ledger
+* `get_lease_charge` - Get a lease charge by ID
+* `create_lease_charge` - Create a lease charge *(sensitive)*
+* `update_lease_charge` - Update a lease charge *(sensitive)*
+* `create_lease_payment` - Record a lease payment *(sensitive)*
+* `update_lease_payment` - Update a lease payment *(sensitive)*
+* `create_lease_credit` - Issue a lease credit *(sensitive)*
+* `create_lease_refund` - Issue a lease refund *(sensitive)*
+* `get_lease_refund` - Get a lease refund by ID
+* `list_lease_recurring_transactions` - List recurring transactions on a lease
+* `list_lease_outstanding_balances` - List outstanding balances across leases
+* `lease_receivables_summary` - Summarized, LLM-friendly outstanding-receivables report (auto-paginated)
 
 ### Rentals (5 tools)
 * `list_rentals` - List rental properties
@@ -419,12 +436,19 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 * `create_vendor_category` - Create a new vendor category
 * `update_vendor_category` - Update a vendor category
 
-### Tasks (5 tools)
+### Tasks (24 tools)
 * `list_tasks` - List tasks
 * `get_task` - Get task details by ID
 * `list_task_categories` - List task categories
 * `create_task_category` - Create a new task category
 * `update_task_category` - Update a task category
+* `list_task_history` - List history entries for a task
+* `get_task_history` - Get a task history entry by ID
+* `update_task_history` - Update a task history entry (status/notes/assignment)
+* `list_contact_requests` / `get_contact_request` / `create_contact_request` / `update_contact_request` - Contact-request tasks
+* `list_todo_requests` / `get_todo_request` / `create_todo_request` / `update_todo_request` - To-do tasks
+* `list_resident_requests` / `get_resident_request` / `create_resident_request` / `update_resident_request` - Resident-request tasks
+* `list_rental_owner_requests` / `get_rental_owner_request` / `create_rental_owner_request` / `update_rental_owner_request` - Rental-owner-request tasks
 
 ### Bills (7 tools)
 * `list_bills` - List bills
@@ -464,6 +488,37 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 * `get_work_order` - Get work order details by ID
 * `create_work_order` - Create a new work order
 * `update_work_order` - Update an existing work order
+
+### Documents (4 tools)
+* Document generation and downloadable file creation (see the document assistant section above).
+
+### Ownership Accounts (11 tools)
+* `get_ownership_account` - Get an association ownership account by ID
+* `list_ownership_account_transactions` - List ledger transactions for an ownership account
+* `get_ownership_account_transaction` - Get an ownership-account transaction by ID
+* `list_ownership_account_charges` - List charges on an ownership account
+* `get_ownership_account_charge` - Get an ownership-account charge by ID
+* `create_ownership_account_charge` - Create an ownership-account charge *(sensitive)*
+* `update_ownership_account_charge` - Update an ownership-account charge *(sensitive)*
+* `create_ownership_account_payment` - Record an ownership-account payment *(sensitive)*
+* `create_ownership_account_credit` - Issue an ownership-account credit *(sensitive)*
+* `create_ownership_account_refund` - Issue an ownership-account refund *(sensitive)*
+* `list_ownership_account_outstanding_balances` - List outstanding balances across ownership accounts
+
+### Communications (14 tools)
+* `list_announcements` / `get_announcement` / `create_announcement` / `expire_announcement` - Resident/owner announcements
+* `list_emails` / `get_email` / `create_email` / `list_email_recipients` - Email outreach
+* `list_phone_logs` / `get_phone_log` / `create_phone_log` / `update_phone_log` - Phone call logging
+* `list_mailing_templates` / `get_mailing_template` - Mailing templates
+
+### Budgets (4 tools)
+* `list_budgets` - List budgets
+* `get_budget` - Get budget details by ID
+* `create_budget` - Create a new budget *(sensitive)*
+* `update_budget` - Update an existing budget *(sensitive)*
+
+### Reference (1 tool + MCP resources)
+* `get_reference_data` - Return controlled vocabularies for enum fields (lease/task/work-order statuses, property types, ...). The same vocabularies are also published as MCP **resources** under `buildium://reference/*`.
 
 ## Tool Request/Response Examples
 

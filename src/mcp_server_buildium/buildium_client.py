@@ -14,18 +14,25 @@ from .sdk_imports import (  # noqa: E402
     BankAccountsApi,
     BillsApi,
     BoardMembersApi,
+    BudgetsApi,
+    CommunicationsApi,
     Configuration,
+    ContactRequestsApi,
     FilesApi,
     GeneralLedgerApi,
     LeasesApi,
     LeaseTransactionsApi,
     ListingsApi,
     OwnershipAccountsApi,
+    OwnershipAccountTransactionsApi,
+    RentalOwnerRequestsApi,
     RentalOwnersApi,
     RentalPropertiesApi,
     RentalTenantsApi,
     RentalUnitsApi,
+    ResidentRequestsApi,
     TasksApi,
+    ToDoRequestsApi,
     VendorsApi,
     WorkOrdersApi,
 )
@@ -60,6 +67,7 @@ class BuildiumClient:
         self.ownership_accounts_api = OwnershipAccountsApi(self._api_client)
         self.leases_api = LeasesApi(self._api_client)
         self.lease_transactions_api = LeaseTransactionsApi(self._api_client)
+        self.ownership_account_transactions_api = OwnershipAccountTransactionsApi(self._api_client)
         self.rentals_api = RentalPropertiesApi(self._api_client)
         self.listings_api = ListingsApi(self._api_client)
         self.applicants_api = ApplicantsApi(self._api_client)
@@ -76,6 +84,12 @@ class BuildiumClient:
         self.bank_accounts_api = BankAccountsApi(self._api_client)
         self.general_ledger_api = GeneralLedgerApi(self._api_client)
         self.work_orders_api = WorkOrdersApi(self._api_client)
+        self.communications_api = CommunicationsApi(self._api_client)
+        self.budgets_api = BudgetsApi(self._api_client)
+        self.contact_requests_api = ContactRequestsApi(self._api_client)
+        self.to_do_requests_api = ToDoRequestsApi(self._api_client)
+        self.resident_requests_api = ResidentRequestsApi(self._api_client)
+        self.rental_owner_requests_api = RentalOwnerRequestsApi(self._api_client)
 
     def _initialize_sdk(self) -> None:
         """Initialize the SDK configuration and API client with API key headers."""
