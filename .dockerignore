@@ -12,3 +12,22 @@ htmlcov
 .coverage
 docs
 tests
+
+# Local environment / secrets — never needed inside an image.
+.env
+.env.*
+
+# Large artifacts that are not copied into any image but bloat the build
+# context (slower `docker build`, more memory pressure during export).
+openapi.json
+extension
+specs
+scripts
+
+# The generated Buildium SDK ships a 500+ file test suite and API docs that
+# are never imported at runtime. With UV_COMPILE_BYTECODE=1 they are compiled
+# into the venv and copied into the runtime image, adding ~65MB and risking
+# slow builds / OOM ("graceful_stop") during image export. Exclude them.
+src/mcp_server_buildium/buildium_sdk/test
+src/mcp_server_buildium/buildium_sdk/docs
+src/mcp_server_buildium/buildium_sdk/*.md
