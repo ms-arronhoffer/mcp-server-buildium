@@ -227,12 +227,13 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 * `list_association_board_members` - List board members for an association
 * `list_association_ownership_accounts` - List ownership accounts for an association
 
-### Leases (5 tools)
+### Leases (6 tools)
 * `list_leases` - List leases with optional filters
 * `get_lease` - Get lease details by ID
 * `create_lease` - Create a new lease
 * `update_lease` - Update an existing lease
 * `list_lease_transactions` - List transactions for a lease
+* `get_lease_transaction` - Get a lease ledger transaction by ID
 
 ### Rentals (5 tools)
 * `list_rentals` - List rental properties
@@ -323,6 +324,18 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 * `update_bank_account` - Update a bank account
 * `list_bank_account_transactions` - List transactions for a bank account
 * `get_bank_account_transaction` - Get bank account transaction details by ID
+
+### General Ledger (4 tools)
+* `list_gl_accounts` - List general ledger accounts
+* `get_gl_account` - Get general ledger account details by ID
+* `list_gl_transactions` - List general ledger transactions
+* `get_gl_transaction` - Get general ledger transaction details by ID
+
+### Work Orders (4 tools)
+* `list_work_orders` - List work orders
+* `get_work_order` - Get work order details by ID
+* `create_work_order` - Create a new work order
+* `update_work_order` - Update an existing work order
 
 ## Tool Request/Response Examples
 

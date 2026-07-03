@@ -67,9 +67,6 @@ MAX_RETRIES = _env_int("BUILDIUM_MAX_RETRIES", 3)
 BASE_BACKOFF_SECONDS = _env_float("BUILDIUM_BASE_BACKOFF_SECONDS", 0.5)
 MAX_BACKOFF_SECONDS = _env_float("BUILDIUM_MAX_BACKOFF_SECONDS", 8.0)
 
-# Per-request timeout (seconds) passed to the SDK.
-REQUEST_TIMEOUT_SECONDS = _env_float("BUILDIUM_REQUEST_TIMEOUT_SECONDS", 30.0)
-
 # ---------------------------------------------------------------------------
 # Operation registry (tool name -> Buildium OpenAPI operationId)
 # ---------------------------------------------------------------------------
