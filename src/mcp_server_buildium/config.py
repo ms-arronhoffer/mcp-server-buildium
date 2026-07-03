@@ -44,6 +44,9 @@ ALL_CATEGORIES = frozenset(
         "communications",
         "budgets",
         "reference",
+        "reports",
+        "close",
+        "alerts",
     }
 )
 

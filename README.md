@@ -11,7 +11,10 @@
 ## Features
 
 * 🔐 **API Key Authentication** - Secure server-to-server authentication via headers
-* 🏘️ **155 Tools Across 19 Categories** - Comprehensive property management coverage
+* 🏘️ **160 Tools Across 22 Categories** - Comprehensive property management coverage
+* 💸 **Month-End Close Automation** - Post rent, apply payments oldest-first, assess late fees, and produce owner statements in one instruction (dry-run by default)
+* 🔔 **Proactive Alerts & Digest** - A rules layer for scheduled, push-style intelligence (lease expirations, late rent, low reserves, aging work orders)
+* 📊 **Trustworthy Financial Reports** - Deterministic, reconciled rent roll, aged receivables, and P&L with branded PDF/XLSX/CSV export
 * 📋 **Selective Tool Loading** - Enable only the categories you need
 * 🛡️ **Roles & Guardrails** - Read-only mode, RBAC roles, allow/deny lists, rate limiting
 * 🧾 **Audit Trail** - Structured, redacted audit events with pluggable sinks and reporting
@@ -85,10 +88,13 @@ Control which tool categories are enabled using the `BUILDIUM_CATEGORIES` enviro
 | `communications` | 14 | Announcements, emails, phone logs, and mailing templates |
 | `budgets` | 4 | Budget planning (create/update/get/list) |
 | `reference` | 1 | Reference-data vocabularies for enum fields (also exposed as MCP resources) |
+| `reports` | 3 | Deterministic, reconciled financial reports (rent roll, aged receivables, income statement) with branded PDF/XLSX/CSV export |
+| `close` | 1 | Month-end "close my books" automation (post rent, apply payments oldest-first, assess late fees, owner statements) |
+| `alerts` | 1 | Proactive portfolio intelligence — scheduled alerts & daily digest (lease expirations, late rent, low bank reserve, aging work orders) |
 
-**Total: 155 category tools + built-in `health_check` and `audit_summary` tools (157 total).**
+**Total: 160 category tools + built-in `health_check` and `audit_summary` tools (162 total).**
 
-If `BUILDIUM_CATEGORIES` is not set, all 155 tools across all 19 categories are enabled.
+If `BUILDIUM_CATEGORIES` is not set, all 160 tools across all 22 categories are enabled.
 
 ### Security, Roles & Audit
 
@@ -347,10 +353,10 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 }
 ```
 
-## Available Tools (155 category tools)
+## Available Tools (160 category tools)
 
-> In addition to the 155 category tools below, the server exposes two built-in
-> tools: `health_check` and `audit_summary` (admin-only), for a total of 157.
+> In addition to the 160 category tools below, the server exposes two built-in
+> tools: `health_check` and `audit_summary` (admin-only), for a total of 162.
 
 ### Associations (6 tools)
 * `list_associations` - List all associations
@@ -519,6 +525,25 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 
 ### Reference (1 tool + MCP resources)
 * `get_reference_data` - Return controlled vocabularies for enum fields (lease/task/work-order statuses, property types, ...). The same vocabularies are also published as MCP **resources** under `buildium://reference/*`.
+
+### Reports (3 tools)
+
+Deterministic, reconciled financial reports that fan out across **all** pages of
+the underlying endpoint, compute every figure in code (not free-text LLM math),
+report a `reconciled` flag, and optionally export a branded `csv`/`xlsx`/`pdf`
+download traceable back to source transactions.
+
+* `rent_roll_report` - Rent roll across every lease (tenant, scheduled rent, dates, balance) with portfolio totals *(sensitive)*
+* `aged_receivables_report` - A/R aged 0-30/31-60/61-90/90+ by applying payments oldest-first, reconciled to the ledger balance *(sensitive)*
+* `income_statement_report` - Profit & loss from GL transactions grouped by income/expense account, net income reconciled *(sensitive)*
+
+### Close (1 tool)
+
+* `run_month_end_close` - One-instruction month-end close for a property/portfolio: posts recurring rent, applies received payments oldest-first, assesses late fees past the grace period, and summarises per-owner statements. **Dry-run by default** (returns the plan without writing); executes only when `dry_run=False` with the required GL accounts supplied *(sensitive write)*
+
+### Alerts (1 tool)
+
+* `portfolio_alerts` - Proactive rules layer that scans the portfolio and returns prioritised alerts plus a human-readable daily digest: leases expiring with no renewal, late rent, bank accounts below reserve, and aging work orders. Point a scheduler (cron/task runner) at it for push-style intelligence. Optional `csv`/`xlsx`/`pdf` export.
 
 ## Tool Request/Response Examples
 

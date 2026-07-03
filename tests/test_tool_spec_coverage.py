@@ -81,6 +81,11 @@ def test_every_registered_tool_is_mapped_or_local(
         "save_uploaded_document",
         "get_reference_data",
         "lease_receivables_summary",
+        "rent_roll_report",
+        "aged_receivables_report",
+        "income_statement_report",
+        "run_month_end_close",
+        "portfolio_alerts",
     }
     unmapped = set(registered_tool_names) - set(tool_operations) - server_local
     assert not unmapped, f"Tools with no operation mapping: {sorted(unmapped)}"
