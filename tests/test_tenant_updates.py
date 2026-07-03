@@ -98,7 +98,7 @@ class _FakeClient:
         self.association_tenants_api = _FakeAssociationTenantsApi(association_current or {})
 
 
-async def _get_tool(client: _FakeClient, name: str):
+async def _get_tool(client: _FakeClient, name: str) -> Any:
     mcp = FastMCP("test")
     register_tenant_tools(mcp, client)
     tools = await mcp.get_tools()
