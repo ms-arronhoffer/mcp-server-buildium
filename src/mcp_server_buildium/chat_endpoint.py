@@ -46,15 +46,22 @@ async def _authenticate(
         return True, {}
     header = request.headers.get("Authorization", "")
     if not header.lower().startswith("bearer "):
+        logger.info("Chat request rejected: missing or malformed Authorization header")
         return False, {}
     token = header[len("bearer ") :].strip()
     if not token:
+        logger.info("Chat request rejected: empty credentials in Authorization header")
         return False, {}
     try:
         result = await verifier.verify_token(token)
     except Exception:  # pragma: no cover - defensive
+        logger.warning("Chat request rejected: token verification raised an error", exc_info=True)
         return False, {}
     if result is None:
+        logger.info(
+            "Chat request rejected: token failed verification "
+            "(issuer/audience/scope/expiry mismatch or bad signature)"
+        )
         return False, {}
     claims = getattr(result, "claims", None) or {}
     return True, claims

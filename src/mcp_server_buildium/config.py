@@ -122,8 +122,11 @@ class BuildiumConfig(BaseSettings):
     entra_issuer: str | None = Field(
         default=None,
         description=(
-            "Optional explicit token issuer. If not set, it is derived from the tenant ID "
-            "as 'https://login.microsoftonline.com/<tenant>/v2.0'."
+            "Optional explicit token issuer. When set, it is the ONLY accepted "
+            "issuer. When unset, both the v2.0 issuer "
+            "('https://login.microsoftonline.com/<tenant>/v2.0') and the v1.0 "
+            "issuer ('https://sts.windows.net/<tenant>/') are accepted, so the "
+            "server works whether the API app mints v1 or v2 access tokens."
         ),
     )
     entra_jwks_uri: str | None = Field(
@@ -392,6 +395,30 @@ class BuildiumConfig(BaseSettings):
             return self.entra_issuer
         if self.entra_tenant_id:
             return f"https://login.microsoftonline.com/{self.entra_tenant_id}/v2.0"
+        return None
+
+    def get_entra_accepted_issuers(self) -> list[str] | None:
+        """Return every token issuer accepted for this tenant.
+
+        Microsoft Entra ID can mint either a v1.0 or a v2.0 access token for the
+        same app registration depending on the API app's
+        ``accessTokenAcceptedVersion`` setting (default ``null`` == v1). The two
+        differ only in the ``iss`` claim:
+
+        * v1: ``https://sts.windows.net/<tenant>/``
+        * v2: ``https://login.microsoftonline.com/<tenant>/v2.0``
+
+        We accept both by default so the server works regardless of that
+        setting. An explicit ``entra_issuer`` override, when set, wins and is
+        used as the sole accepted issuer.
+        """
+        if self.entra_issuer:
+            return [self.entra_issuer]
+        if self.entra_tenant_id:
+            return [
+                f"https://login.microsoftonline.com/{self.entra_tenant_id}/v2.0",
+                f"https://sts.windows.net/{self.entra_tenant_id}/",
+            ]
         return None
 
     def get_entra_jwks_uri(self) -> str | None:
