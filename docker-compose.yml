@@ -1,11 +1,13 @@
 # Local end-to-end testing stack: the mock Buildium API + the MCP server.
 #
-#   docker compose up --build mockapi        # start the seeded mock API
-#   docker compose run --rm mcp-server        # run the MCP server against it
+#   docker compose up --build mockapi            # start the seeded mock API
+#   docker compose up --build mcp-server-http    # start the HTTP transport
+#   docker compose run --rm mcp-server           # run the STDIO server on demand
 #
-# The MCP server speaks STDIO, so it is intended to be attached to an MCP
-# client (or exercised via `docker compose run`), while the mock API runs as a
-# long-lived HTTP service.
+# The STDIO `mcp-server` service speaks STDIO and needs an attached MCP client,
+# so it is kept out of a plain `docker compose up` via the `stdio` profile and is
+# intended to be exercised with `docker compose run`. The HTTP transport
+# (`mcp-server-http`) runs as a long-lived service for remote/browser clients.
 
 services:
   mockapi:
@@ -30,6 +32,12 @@ services:
       context: .
       dockerfile: Dockerfile
     image: mcp-server-buildium:latest
+    # This service speaks STDIO and is meant to be attached on demand via
+    # `docker compose run --rm mcp-server`. The `stdio` profile keeps it out of a
+    # plain `docker compose up` so it does not start (and immediately exit)
+    # without an attached MCP client. `docker compose run` still starts it even
+    # though it is behind a profile.
+    profiles: ["stdio"]
     depends_on:
       mockapi:
         condition: service_healthy
@@ -40,6 +48,13 @@ services:
       - path: .env
         required: false
     environment:
+      # Container-specific values that must win over anything in .env. This
+      # service is STDIO-only: force the STDIO transport (a LAN `BUILDIUM_HOST`
+      # from .env would otherwise flip it into an HTTP server that cannot bind
+      # that host inside the container and crashes with exit code 1) and bind all
+      # interfaces just in case.
+      BUILDIUM_TRANSPORT: "stdio"
+      BUILDIUM_HOST: "0.0.0.0"
       # Fallbacks used only when the key is not already set in .env / the host
       # env. base_url must NOT include /v1 — the SDK appends it to each path.
       BUILDIUM_BASE_URL: "${BUILDIUM_BASE_URL:-http://mockapi:8080}"

@@ -712,6 +712,11 @@ docker compose up --build mockapi
 docker compose run --rm mcp-server
 ```
 
+> The STDIO `mcp-server` service is behind the `stdio` Compose profile, so a
+> plain `docker compose up` starts only `mockapi` and `mcp-server-http` and
+> never the STDIO service (which would immediately exit with no MCP client
+> attached). Use `docker compose run --rm mcp-server` to run it on demand.
+
 Two images are produced: `mcp-server-buildium` (`Dockerfile`) and
 `mcp-server-buildium-mockapi` (`Dockerfile.mockapi`, seeds on startup).
 
