@@ -304,7 +304,16 @@ def gemini_contents(messages: list[Message]) -> tuple[dict[str, Any] | None, lis
             if m.get("content"):
                 parts.append({"text": m["content"]})
             for tc in m.get("tool_calls") or []:
-                parts.append({"functionCall": {"name": tc.name, "args": tc.arguments}})
+                fc_part: dict[str, Any] = {
+                    "functionCall": {"name": tc.name, "args": tc.arguments}
+                }
+                # Gemini 2.5+ requires the ``thoughtSignature`` returned with a
+                # functionCall to be echoed back verbatim, or it rejects the
+                # request with a 400 ("missing a thought_signature").
+                signature = getattr(tc, "thought_signature", None)
+                if signature:
+                    fc_part["thoughtSignature"] = signature
+                parts.append(fc_part)
             contents.append({"role": "model", "parts": parts})
         elif role == "tool":
             contents.append(
@@ -342,6 +351,7 @@ def parse_gemini_response(data: dict[str, Any]) -> Completion:
                     id=f"call_{len(tool_calls)}",
                     name=fc.get("name") or "",
                     arguments=fc.get("args") or {},
+                    thought_signature=part.get("thoughtSignature"),
                 )
             )
     return Completion(content="".join(text_parts), tool_calls=tool_calls)

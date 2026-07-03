@@ -226,3 +226,44 @@ def test_parse_gemini_response() -> None:
     assert completion.content == "hi"
     assert completion.tool_calls[0].name == "f"
     assert completion.tool_calls[0].arguments == {"a": 1}
+
+
+def test_parse_gemini_response_captures_thought_signature() -> None:
+    completion = parse_gemini_response(
+        {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {
+                                "functionCall": {"name": "f", "args": {"a": 1}},
+                                "thoughtSignature": "sig-abc",
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+    )
+    assert completion.tool_calls[0].thought_signature == "sig-abc"
+
+
+def test_gemini_contents_echoes_thought_signature() -> None:
+    conversation = [
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                ToolCall("c1", "list_leases", {"a": 1}, thought_signature="sig-abc")
+            ],
+        },
+    ]
+    _system, contents = gemini_contents(conversation)
+    part = contents[0]["parts"][0]
+    assert part["functionCall"] == {"name": "list_leases", "args": {"a": 1}}
+    assert part["thoughtSignature"] == "sig-abc"
+
+
+def test_gemini_contents_omits_absent_thought_signature() -> None:
+    _system, contents = gemini_contents(CONVERSATION)
+    assert "thoughtSignature" not in contents[1]["parts"][0]
