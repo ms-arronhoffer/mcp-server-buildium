@@ -5,8 +5,8 @@ from typing import Any
 from fastmcp import FastMCP
 
 from ..buildium_client import BuildiumClient
+from . import _common as c
 
-# Import SDK models - they're imported via sdk_imports path setup
 try:
     from mcp_server_buildium.buildium_sdk.models.association_post_message import (
         AssociationPostMessage,
@@ -14,147 +14,112 @@ try:
     from mcp_server_buildium.buildium_sdk.models.association_put_message import (
         AssociationPutMessage,
     )
-except ImportError:
-    # Fallback: define minimal model classes if SDK not available
-    class AssociationPostMessage:
+except ImportError:  # pragma: no cover
+
+    class AssociationPostMessage:  # type: ignore[no-redef]
         def __init__(self, **kwargs):
             self.__dict__.update(kwargs)
 
-    class AssociationPutMessage:
+    class AssociationPutMessage:  # type: ignore[no-redef]
         def __init__(self, **kwargs):
             self.__dict__.update(kwargs)
 
 
 def register_association_tools(mcp: FastMCP, client: BuildiumClient) -> None:
-    """Register association-related tools with the MCP server.
+    """Register association-related tools with the MCP server."""
 
-    Args:
-        mcp: FastMCP server instance.
-        client: Buildium client instance.
-    """
+    c.register_operation("list_associations", "ExternalApiAssociations_GetAssociations")
+    c.register_operation("get_association", "ExternalApiAssociations_GetAssociationById")
+    c.register_operation("create_association", "ExternalApiAssociations_CreateAssociation")
+    c.register_operation("update_association", "ExternalApiAssociations_UpdateAssociation")
+    c.register_operation(
+        "list_association_board_members",
+        "ExternalApiAssociationBoardMembers_GetAllAssociationBoardMembers",
+    )
+    c.register_operation(
+        "list_association_ownership_accounts",
+        "ExternalApiOwnershipAccounts_GetAllOwnershipAccounts",
+    )
 
     @mcp.tool()
     async def list_associations(limit: int = 100, offset: int = 0) -> dict[str, Any]:
         """List associations from Buildium.
 
         Args:
-            limit: Maximum number of results (default: 100).
-            offset: Offset for pagination (default: 0).
+            limit: Maximum number of results (1-1000, default: 100).
+            offset: Zero-based pagination offset (default: 0).
 
         Returns:
-            Dictionary with associations list and metadata.
+            Envelope ``{data, count, error}`` with the associations list.
         """
-        result = await client.associations_api.external_api_associations_get_associations(
-            limit=limit, offset=offset
-        )
-        # Convert SDK model to dict
-        if hasattr(result, "to_dict"):
-            return result.to_dict()
-        return (
-            result if isinstance(result, dict) else {"associations": result, "count": len(result)}
+        limit, offset = c.clamp_pagination(limit, offset)
+        return await c.execute(
+            "list_associations",
+            lambda: client.associations_api.external_api_associations_get_associations(
+                limit=limit, offset=offset
+            ),
         )
 
     @mcp.tool()
     async def get_association(association_id: int) -> dict[str, Any]:
-        """Get a specific association by ID.
-
-        Args:
-            association_id: The association ID.
-
-        Returns:
-            Association details as dictionary.
-        """
-        result = await client.associations_api.external_api_associations_get_association_by_id(
-            association_id=association_id
+        """Get a specific association by ID."""
+        return await c.execute(
+            "get_association",
+            lambda: client.associations_api.external_api_associations_get_association_by_id(
+                association_id=association_id
+            ),
         )
-        if hasattr(result, "to_dict"):
-            return result.to_dict()
-        return result if isinstance(result, dict) else result
 
     @mcp.tool()
     async def create_association(association_data: dict[str, Any]) -> dict[str, Any]:
-        """Create a new association.
-
-        Args:
-            association_data: Association data dictionary with required fields.
-
-        Returns:
-            Created association details.
-        """
-        # Convert dict to SDK model
-        association_message = AssociationPostMessage(**association_data)
-        result = await client.associations_api.external_api_associations_create_association(
-            association_post_message=association_message
+        """Create a new association."""
+        message = AssociationPostMessage(**association_data)
+        return await c.execute(
+            "create_association",
+            lambda: client.associations_api.external_api_associations_create_association(
+                association_post_message=message
+            ),
         )
-        if hasattr(result, "to_dict"):
-            return result.to_dict()
-        return result if isinstance(result, dict) else result
 
     @mcp.tool()
     async def update_association(
         association_id: int, association_data: dict[str, Any]
     ) -> dict[str, Any]:
-        """Update an existing association.
-
-        Args:
-            association_id: The association ID.
-            association_data: Association data dictionary with fields to update.
-
-        Returns:
-            Updated association details.
-        """
-        association_message = AssociationPutMessage(**association_data)
-        result = await client.associations_api.external_api_associations_update_association(
-            association_id=association_id, association_put_message=association_message
+        """Update an existing association."""
+        message = AssociationPutMessage(**association_data)
+        return await c.execute(
+            "update_association",
+            lambda: client.associations_api.external_api_associations_update_association(
+                association_id=association_id, association_put_message=message
+            ),
         )
-        if hasattr(result, "to_dict"):
-            return result.to_dict()
-        return result if isinstance(result, dict) else result
 
     @mcp.tool()
     async def list_association_board_members(
         association_id: int, limit: int = 100, offset: int = 0
     ) -> dict[str, Any]:
-        """List board members for a specific association.
-
-        Args:
-            association_id: The association ID.
-            limit: Maximum number of results (default: 100).
-            offset: Offset for pagination (default: 0).
-
-        Returns:
-            Dictionary with board members list.
-        """
-        result = await client.associations_api.external_api_associations_get_board_members_for_association_by_id(
-            association_id=association_id, limit=limit, offset=offset
-        )
-        if hasattr(result, "to_dict"):
-            return result.to_dict()
-        return (
-            result if isinstance(result, dict) else {"boardMembers": result, "count": len(result)}
+        """List board members for a specific association."""
+        limit, offset = c.clamp_pagination(limit, offset)
+        return await c.execute(
+            "list_association_board_members",
+            lambda: (
+                client.board_members_api.external_api_association_board_members_get_all_association_board_members(
+                    association_id=association_id, limit=limit, offset=offset
+                )
+            ),
         )
 
     @mcp.tool()
     async def list_association_ownership_accounts(
         association_id: int, limit: int = 100, offset: int = 0
     ) -> dict[str, Any]:
-        """List ownership accounts for a specific association.
-
-        Args:
-            association_id: The association ID.
-            limit: Maximum number of results (default: 100).
-            offset: Offset for pagination (default: 0).
-
-        Returns:
-            Dictionary with ownership accounts list.
-        """
-        result = await client.associations_api.external_api_associations_get_ownership_accounts_for_association_by_id(
-            association_id=association_id, limit=limit, offset=offset
-        )
-        if hasattr(result, "to_dict"):
-            return result.to_dict()
-        return (
-            result
-            if isinstance(result, dict)
-            else {"ownershipAccounts": result, "count": len(result)}
+        """List ownership accounts for a specific association."""
+        limit, offset = c.clamp_pagination(limit, offset)
+        return await c.execute(
+            "list_association_ownership_accounts",
+            lambda: (
+                client.ownership_accounts_api.external_api_ownership_accounts_get_all_ownership_accounts(
+                    associationids=[association_id], limit=limit, offset=offset
+                )
+            ),
         )

@@ -3,8 +3,8 @@
 # Generate Python SDK from OpenAPI spec using Docker
 generate-sdk:
 	@echo "Generating Python SDK from OpenAPI spec using Docker..."
-	@docker run --rm -v "${PWD}:/local" -v /tmp:/tmp openapitools/openapi-generator-cli:latest generate \
-		-i /tmp/buildium-openapi.json \
+	@docker run --rm -v "${PWD}:/local" openapitools/openapi-generator-cli:latest generate \
+		-i /local/openapi.json \
 		-g python \
 		-o /local/buildium_sdk \
 		-p packageName=buildium_sdk,projectName=buildium-sdk,packageVersion=0.1.0,library=httpx,generateSourceCodeOnly=true \

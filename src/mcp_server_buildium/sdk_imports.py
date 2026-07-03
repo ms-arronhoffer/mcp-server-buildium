@@ -1,4 +1,4 @@
-"""Helper module to import Buildium SDK."""
+"""Helper module to import Buildium SDK API classes."""
 
 # Import SDK components (now a subpackage)
 from mcp_server_buildium.buildium_sdk.api import (
@@ -9,14 +9,20 @@ from mcp_server_buildium.buildium_sdk.api import (
     AssociationUnitsApi,
     BankAccountsApi,
     BillsApi,
+    BoardMembersApi,
     FilesApi,
+    GeneralLedgerApi,
     LeasesApi,
+    LeaseTransactionsApi,
+    ListingsApi,
+    OwnershipAccountsApi,
     RentalOwnersApi,
     RentalPropertiesApi,
     RentalTenantsApi,
     RentalUnitsApi,
     TasksApi,
     VendorsApi,
+    WorkOrdersApi,
 )
 from mcp_server_buildium.buildium_sdk.api_client import ApiClient
 from mcp_server_buildium.buildium_sdk.configuration import Configuration
@@ -26,6 +32,7 @@ __all__ = [
     "Configuration",
     "AssociationsApi",
     "LeasesApi",
+    "LeaseTransactionsApi",
     "RentalPropertiesApi",
     "ApplicantsApi",
     "RentalTenantsApi",
@@ -39,4 +46,9 @@ __all__ = [
     "BillsApi",
     "FilesApi",
     "BankAccountsApi",
+    "BoardMembersApi",
+    "OwnershipAccountsApi",
+    "ListingsApi",
+    "GeneralLedgerApi",
+    "WorkOrdersApi",
 ]

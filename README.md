@@ -11,7 +11,7 @@
 ## Features
 
 * 🔐 **API Key Authentication** - Secure server-to-server authentication via headers
-* 🏘️ **81 Tools Across 12 Categories** - Comprehensive property management coverage
+* 🏘️ **91 Tools Across 14 Categories** - Comprehensive property management coverage
 * 📋 **Selective Tool Loading** - Enable only the categories you need
 * 🏢 **Multi-Property Types** - Rentals, associations, and units
 * 🔌 **MCP Protocol** - Compatible with Claude Desktop, Cursor, and other MCP clients
@@ -65,7 +65,7 @@ Control which tool categories are enabled using the `BUILDIUM_CATEGORIES` enviro
 | Category | Tools | Description |
 |----------|-------|-------------|
 | `associations` | 6 | Homeowner association management |
-| `leases` | 5 | Lease agreements and transactions |
+| `leases` | 6 | Lease agreements and transactions |
 | `rentals` | 5 | Rental properties and listings |
 | `applicants` | 10 | Rental applicants and applications |
 | `tenants` | 7 | Tenant management (rental & association) |
@@ -76,10 +76,12 @@ Control which tool categories are enabled using the `BUILDIUM_CATEGORIES` enviro
 | `bills` | 7 | Bill and payment management |
 | `files` | 8 | Document and file management |
 | `bank_accounts` | 6 | Bank account and transaction management |
+| `general_ledger` | 4 | General ledger accounts and transactions |
+| `work_orders` | 4 | Work order management |
 
-**Total: 81 tools**
+**Total: 90 category tools + a built-in `health_check` tool (91 total).**
 
-If `BUILDIUM_CATEGORIES` is not set, all 81 tools across all 12 categories are enabled.
+If `BUILDIUM_CATEGORIES` is not set, all 90 tools across all 14 categories are enabled.
 
 ### Environment File
 
@@ -508,6 +510,47 @@ uv run ruff check .
 uv run ruff format .
 ```
 
+### Local End-to-End Testing with the Mock API
+
+A spec-accurate mock of the Buildium API (FastAPI + SQLite, in `mockapi/`) lets
+you exercise every tool against realistic, seeded data with no live credentials.
+
+```bash
+# Install the mock API extra
+uv pip install -e ".[dev,mockapi]"
+
+# Seed the database and serve the mock on http://127.0.0.1:8080
+python -m mockapi
+
+# In another shell, point the server at the mock and run the e2e suite
+uv run pytest tests/test_e2e_mock.py
+```
+
+Or run the whole stack in containers:
+
+```bash
+# Build and start the seeded mock API
+docker compose up --build mockapi
+
+# Run the MCP server against the mock (STDIO transport)
+docker compose run --rm mcp-server
+```
+
+Two images are produced: `mcp-server-buildium` (`Dockerfile`) and
+`mcp-server-buildium-mockapi` (`Dockerfile.mockapi`, seeds on startup).
+
+### Validating Tools Against the OpenAPI Spec
+
+Every tool is mapped to a real Buildium operation in `openapi.json`. Regenerate
+the coverage report and run the validation tests with:
+
+```bash
+uv run python scripts/generate_tool_coverage.py   # writes docs/tool-coverage.md
+uv run pytest tests/test_tool_spec_coverage.py
+```
+
+See [`docs/tool-coverage.md`](docs/tool-coverage.md) for the current tool → endpoint mapping.
+
 ### Integration Tests (Optional)
 
 Integration tests validate real Buildium API authentication. They are **skipped by default** and only run when you provide real credentials.
@@ -553,10 +596,8 @@ To run integration tests in GitHub Actions:
 
 **What the integration tests verify:**
 
-* ✅ OAuth authentication works with your credentials
-* ✅ Access token can be obtained successfully
+* ✅ API key header authentication works with your credentials
 * ✅ API calls work (tests `list_associations`, `list_rentals`, `list_leases`)
-* ✅ Token refresh mechanism works
 
 **Note**: Integration tests require a Buildium developer account (sandbox environment recommended).
 
@@ -581,7 +622,7 @@ mcp-server-buildium/
 │   ├── __init__.py
 │   ├── server.py           # Main FastMCP server
 │   ├── config.py           # Configuration management
-│   ├── buildium_client.py  # OAuth auth & API client
+│   ├── buildium_client.py  # API key auth & API client
 │   └── tools/
 │       ├── associations.py # Association tools
 │       ├── leases.py       # Lease tools
@@ -595,18 +636,11 @@ mcp-server-buildium/
 
 ## Troubleshooting
 
-### "Failed to obtain access token"
-
-* Verify client ID and secret are correct
-* Check base URL is correct (sandbox vs production)
-* Ensure token URL is accessible
-* Verify scopes are correct
-
 ### "401 Unauthorized"
 
-* Check credentials are valid
-* Verify API endpoint URLs
-* Ensure OAuth scopes include required permissions
+* Verify `BUILDIUM_CLIENT_ID` and `BUILDIUM_CLIENT_SECRET` are correct
+* Check base URL is correct (sandbox vs production) and does **not** include `/v1`
+* Confirm the API key has the required permissions in Buildium
 
 ### "Connection timeout"
 
@@ -632,7 +666,7 @@ mcp-server-buildium/
 
 * **Language**: Python 3.11+
 * **Framework**: FastMCP
-* **Auth**: OAuth 2.0 client credentials flow
+* **Auth**: API key headers (`x-buildium-client-id` / `x-buildium-client-secret`)
 * **Transport**: stdio (MCP protocol)
 * **HTTP Client**: httpx
 * **Testing**: pytest with mocks
@@ -642,7 +676,6 @@ mcp-server-buildium/
 * [Buildium Developer Documentation](https://developer.buildium.com/)
 * [Model Context Protocol](https://modelcontextprotocol.io)
 * [FastMCP Framework](https://github.com/jlowin/fastmcp)
-* [OAuth 2.0 Client Credentials Flow](https://oauth.net/2/grant-types/client-credentials/)
 
 ## License
 

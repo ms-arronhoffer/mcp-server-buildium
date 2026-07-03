@@ -1,0 +1,43 @@
+# Local end-to-end testing stack: the mock Buildium API + the MCP server.
+#
+#   docker compose up --build mockapi        # start the seeded mock API
+#   docker compose run --rm mcp-server        # run the MCP server against it
+#
+# The MCP server speaks STDIO, so it is intended to be attached to an MCP
+# client (or exercised via `docker compose run`), while the mock API runs as a
+# long-lived HTTP service.
+
+services:
+  mockapi:
+    build:
+      context: .
+      dockerfile: Dockerfile.mockapi
+    image: mcp-server-buildium-mockapi:latest
+    ports:
+      - "8080:8080"
+    environment:
+      MOCKAPI_HOST: "0.0.0.0"
+      MOCKAPI_PORT: "8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://127.0.0.1:8080/health').status==200 else sys.exit(1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mcp-server-buildium:latest
+    depends_on:
+      mockapi:
+        condition: service_healthy
+    environment:
+      # Point the server at the mock API service on the compose network.
+      # base_url must NOT include /v1 — the SDK appends it to each path.
+      BUILDIUM_BASE_URL: "http://mockapi:8080"
+      BUILDIUM_CLIENT_ID: "mock-client-id"
+      BUILDIUM_CLIENT_SECRET: "mock-client-secret"
+    stdin_open: true
+    tty: true
