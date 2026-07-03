@@ -260,7 +260,7 @@ function makeRowClickable(el, prompt, onAction) {
   };
   el.addEventListener("click", fire);
   el.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") fire(e);
+    if (e.key === "Enter" || e.key === " ") fire(e);
   });
 }
 
