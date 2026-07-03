@@ -16,11 +16,13 @@ from starlette.responses import JSONResponse, StreamingResponse
 
 from .llm import build_provider, flatten_tool_result, run_chat
 from .logging_config import get_logger
+from .security.policy import effective_policy_for_claims
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from fastmcp.server.auth.auth import TokenVerifier
 
     from .config import BuildiumConfig
+    from .security.policy import ToolPolicy
 
 logger = get_logger("mcp_server_buildium.chat")
 
@@ -28,29 +30,42 @@ CHAT_PATH = "/chat"
 CAPABILITIES_PATH = "/capabilities"
 
 
-async def _authorized(
+async def _authenticate(
     request: Request, config: BuildiumConfig, verifier: TokenVerifier | None
-) -> bool:
-    """Return True when the request is permitted.
+) -> tuple[bool, dict]:
+    """Verify the request and return ``(authorized, claims)``.
 
-    Mirrors the MCP auth precedence: dev bypass → configured verifier → open when
-    no auth is configured (e.g. stdio/dev).
+    ``claims`` carries the verified JWT claims (including the Entra ``roles``
+    App Role claim) when a token was validated, else an empty dict. Mirrors the
+    MCP auth precedence: dev bypass → configured verifier → open when no auth is
+    configured (e.g. stdio/dev).
     """
     if config.dev_auth_bypass:
-        return True
+        return True, {}
     if verifier is None:
-        return True
+        return True, {}
     header = request.headers.get("Authorization", "")
     if not header.lower().startswith("bearer "):
-        return False
+        return False, {}
     token = header[len("bearer ") :].strip()
     if not token:
-        return False
+        return False, {}
     try:
         result = await verifier.verify_token(token)
     except Exception:  # pragma: no cover - defensive
-        return False
-    return result is not None
+        return False, {}
+    if result is None:
+        return False, {}
+    claims = getattr(result, "claims", None) or {}
+    return True, claims
+
+
+async def _authorized(
+    request: Request, config: BuildiumConfig, verifier: TokenVerifier | None
+) -> bool:
+    """Return True when the request is permitted (see :func:`_authenticate`)."""
+    authorized, _ = await _authenticate(request, config, verifier)
+    return authorized
 
 
 def _sse(event: dict[str, Any]) -> str:
@@ -58,8 +73,18 @@ def _sse(event: dict[str, Any]) -> str:
     return f"data: {json.dumps(event)}\n\n"
 
 
-def register_chat_routes(mcp: Any, config: BuildiumConfig, verifier: TokenVerifier | None) -> None:
+def register_chat_routes(
+    mcp: Any,
+    config: BuildiumConfig,
+    verifier: TokenVerifier | None,
+    base_policy: ToolPolicy | None = None,
+) -> None:
     """Register the ``/chat`` and ``/capabilities`` routes on the FastMCP app."""
+
+    # When an Entra App Role map is configured (with Entra auth), each chat turn
+    # only advertises/executes tools the caller's role permits.
+    role_map = config.get_entra_role_policy_map()
+    scoping_active = bool(role_map) and config.entra_enabled() and base_policy is not None
 
     @mcp.custom_route(CAPABILITIES_PATH, methods=["GET"])
     async def capabilities(request: Request) -> JSONResponse:  # noqa: RUF029
@@ -79,7 +104,8 @@ def register_chat_routes(mcp: Any, config: BuildiumConfig, verifier: TokenVerifi
 
     @mcp.custom_route(CHAT_PATH, methods=["POST"])
     async def chat(request: Request) -> Any:
-        if not await _authorized(request, config, verifier):
+        authorized, claims = await _authenticate(request, config, verifier)
+        if not authorized:
             return JSONResponse({"error": "unauthorized"}, status_code=401)
         if not config.llm_enabled():
             return JSONResponse(
@@ -117,7 +143,18 @@ def register_chat_routes(mcp: Any, config: BuildiumConfig, verifier: TokenVerifi
             if role in ("user", "assistant"):
                 messages.append({"role": role, "content": m.get("content") or ""})
 
-        # Advertise the in-process, policy-guarded tools to the model.
+        # Resolve the caller's effective policy (server ceiling ∩ Entra App Role).
+        effective = (
+            effective_policy_for_claims(base_policy, role_map, claims)
+            if scoping_active
+            else None
+        )
+
+        def _permitted(name: str) -> bool:
+            return effective is None or effective.is_allowed(name)
+
+        # Advertise the in-process, policy-guarded tools to the model, filtered to
+        # the caller's permitted set.
         tool_map = await mcp.get_tools()
         tool_specs = [
             {
@@ -127,9 +164,12 @@ def register_chat_routes(mcp: Any, config: BuildiumConfig, verifier: TokenVerifi
                 or {"type": "object", "properties": {}},
             }
             for name, tool in tool_map.items()
+            if _permitted(name)
         ]
 
         async def tool_runner(name: str, args: dict[str, Any]) -> str:
+            if not _permitted(name):
+                return f"Error: tool '{name}' is not permitted for your role."
             tool = tool_map.get(name)
             if tool is None:
                 return f"Error: unknown tool '{name}'."

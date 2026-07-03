@@ -12,6 +12,7 @@ from .config import BuildiumConfig
 from .logging_config import configure_logging, get_logger
 from .security.policy import RateLimiter, ToolPolicy
 from .security.registration import GuardedMCP
+from .security.scoping import EntraScopingMiddleware
 from .tools import _common as c
 from .tools.applicants import register_applicant_tools
 from .tools.associations import register_association_tools
@@ -59,6 +60,14 @@ if auth is not None:
 _base_mcp = FastMCP("buildium", auth=auth)
 mcp = GuardedMCP(_base_mcp, policy, audit_recorder, rate_limiter)
 
+# Per-identity tool scoping: when BUILDIUM_ENTRA_ROLE_POLICY_MAP is configured
+# (with Entra auth), narrow each request's tools to the caller's App Role,
+# intersected with the process-wide policy above. No-op otherwise.
+_scoping = EntraScopingMiddleware(config, policy)
+if _scoping.active:
+    _base_mcp.add_middleware(_scoping)
+    logger.info("Entra App Role tool scoping enabled")
+
 # Map category name -> registration function so registration is data-driven.
 _CATEGORY_REGISTRARS = {
     "associations": register_association_tools,
@@ -84,7 +93,7 @@ for _category, _register in _CATEGORY_REGISTRARS.items():
 # Register the server-side assistant HTTP routes (/chat, /capabilities). These are
 # only reachable over the HTTP transport; they run the LLM loop server-side so
 # provider API keys never reach the browser.
-register_chat_routes(mcp, config, auth)
+register_chat_routes(mcp, config, auth, policy)
 if config.llm_enabled():
     logger.info("Server-side assistant enabled (provider=%s)", config.get_llm_provider())
 

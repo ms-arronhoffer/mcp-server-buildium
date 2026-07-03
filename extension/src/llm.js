@@ -29,12 +29,32 @@ export function parseServerEvent(line) {
 export class ChatClient {
   /**
    * @param {import('./config.js').ExtensionConfig} config
-   * @param {() => Promise<string>} getToken  resolves a bearer access token
+   * @param {(opts?:{forceRefresh?:boolean}) => Promise<string>} getToken
+   *   resolves a bearer access token; passed `{forceRefresh:true}` to mint a new
+   *   one when the server rejects the cached token.
    */
   constructor(config, getToken) {
     this.config = config;
     this.getToken = getToken;
     this.chatUrl = deriveEndpoint(config.mcpServerUrl, "chat");
+  }
+
+  /** Issue the POST to /chat with a (optionally force-refreshed) bearer token. */
+  async _send(history, tokenOpts) {
+    const token = await this.getToken(tokenOpts);
+    const body = { messages: history };
+    if (this.config.llmModel && this.config.llmModel.trim()) {
+      body.model = this.config.llmModel.trim();
+    }
+    return fetch(this.chatUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+        Authorization: "Bearer " + token,
+      },
+      body: JSON.stringify(body),
+    });
   }
 
   /**
@@ -46,21 +66,13 @@ export class ChatClient {
    * @returns {Promise<{content:string}>}
    */
   async run(history, callbacks = {}) {
-    const token = await this.getToken();
-    const body = { messages: history };
-    if (this.config.llmModel && this.config.llmModel.trim()) {
-      body.model = this.config.llmModel.trim();
+    let resp = await this._send(history, {});
+    // A cached access token can be rejected by the server (e.g. after a signing-
+    // key rotation or server restart). Before declaring the session expired,
+    // transparently mint a fresh token and retry once.
+    if (resp.status === 401) {
+      resp = await this._send(history, { forceRefresh: true });
     }
-
-    const resp = await fetch(this.chatUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "text/event-stream",
-        Authorization: "Bearer " + token,
-      },
-      body: JSON.stringify(body),
-    });
 
     if (resp.status === 401) {
       const err = new Error("Unauthorized (401): sign-in required or token expired.");

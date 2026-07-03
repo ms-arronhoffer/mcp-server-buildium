@@ -1,7 +1,7 @@
 /** Options page controller: load/save configuration and show the redirect URI. */
 
 import { getApi } from "./browser.js";
-import { DEFAULT_CONFIG, loadConfig, saveConfig, validateConfig } from "./config.js";
+import { DEFAULT_CONFIG, bakedFields, loadConfig, saveConfig, validateConfig } from "./config.js";
 
 const api = getApi();
 
@@ -13,8 +13,14 @@ function el(id) {
 
 async function populate() {
   const cfg = await loadConfig();
+  const preconfigured = new Set(bakedFields());
   for (const key of FIELDS) {
     el(key).value = cfg[key] ?? DEFAULT_CONFIG[key] ?? "";
+    // Baked defaults are prepopulated but remain user-editable.
+    if (preconfigured.has(key)) {
+      el(key).title = "Prepopulated by this build — you can override it.";
+      el(key).classList.add("prefilled");
+    }
   }
   try {
     el("redirect-uri").textContent = api.identity.getRedirectURL();

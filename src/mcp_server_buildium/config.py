@@ -1,5 +1,7 @@
 """Configuration management for Buildium MCP Server."""
 
+import json
+
 from dotenv import load_dotenv
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings
@@ -9,6 +11,9 @@ load_dotenv()
 
 # Built-in security roles (see security.policy for semantics).
 ROLES = frozenset({"readonly", "operator", "admin", "custom"})
+
+# Coarse roles an Entra App Role / group may map to (custom is server-only).
+ENTRA_MAPPABLE_ROLES = frozenset({"readonly", "operator", "admin"})
 
 # Valid audit sink names.
 AUDIT_SINKS = frozenset({"log", "file", "none"})
@@ -134,6 +139,19 @@ class BuildiumConfig(BaseSettings):
         description=(
             "Optional comma-separated list of scopes ('scp' claim) the token must contain "
             "(e.g. 'MCP.Access')."
+        ),
+    )
+    entra_role_policy_map: str | None = Field(
+        default=None,
+        description=(
+            "Optional JSON object mapping Entra App Role values (the token 'roles' claim; "
+            "group object IDs from the 'groups' claim also match) to a coarse security "
+            "role ('readonly', 'operator', or 'admin'). When set (and Entra auth is "
+            "enabled), each request's available tools are narrowed to the caller's mapped "
+            "role, intersected with the server-wide policy. Callers with no matching "
+            "role/group are denied all tools. Example: "
+            '\'{"Buildium.Admin":"admin","Buildium.Operator":"operator",'
+            '"Buildium.ReadOnly":"readonly"}\'.'
         ),
     )
 
@@ -284,6 +302,7 @@ class BuildiumConfig(BaseSettings):
             raise ValueError(
                 "BUILDIUM_ENTRA_AUDIENCE is required when BUILDIUM_ENTRA_TENANT_ID is set"
             )
+        self._validate_entra_role_policy_map()
         unknown = self.get_enabled_categories()
         if unknown is not None:
             invalid = unknown - ALL_CATEGORIES
@@ -389,6 +408,41 @@ class BuildiumConfig(BaseSettings):
             return None
         scopes = [s.strip() for s in self.entra_required_scopes.split(",") if s.strip()]
         return scopes or None
+
+    def _validate_entra_role_policy_map(self) -> None:
+        """Validate the optional Entra App Role → coarse role mapping (JSON)."""
+        if not (self.entra_role_policy_map and self.entra_role_policy_map.strip()):
+            return
+        try:
+            parsed = json.loads(self.entra_role_policy_map)
+        except (ValueError, TypeError) as exc:
+            raise ValueError(
+                "BUILDIUM_ENTRA_ROLE_POLICY_MAP must be a valid JSON object mapping "
+                "App Role/group values to a coarse role"
+            ) from exc
+        if not isinstance(parsed, dict) or not parsed:
+            raise ValueError(
+                "BUILDIUM_ENTRA_ROLE_POLICY_MAP must be a non-empty JSON object"
+            )
+        for key, value in parsed.items():
+            if not isinstance(key, str) or not key.strip():
+                raise ValueError("BUILDIUM_ENTRA_ROLE_POLICY_MAP keys must be non-empty strings")
+            if not isinstance(value, str) or value.strip().lower() not in ENTRA_MAPPABLE_ROLES:
+                raise ValueError(
+                    f"BUILDIUM_ENTRA_ROLE_POLICY_MAP value {value!r} for {key!r} must be one of "
+                    f"{sorted(ENTRA_MAPPABLE_ROLES)}"
+                )
+
+    def get_entra_role_policy_map(self) -> dict[str, str] | None:
+        """Return the App Role/group → coarse role mapping, or None when unset.
+
+        Keys are matched against the token's ``roles`` (App Roles) and ``groups``
+        claims; values are normalized to lower-case coarse role names.
+        """
+        if not (self.entra_role_policy_map and self.entra_role_policy_map.strip()):
+            return None
+        parsed = json.loads(self.entra_role_policy_map)
+        return {str(k): str(v).strip().lower() for k, v in parsed.items()}
 
     def get_cors_origins(self) -> list[str] | None:
         """Return allowed CORS origins as a list, or None when unset."""

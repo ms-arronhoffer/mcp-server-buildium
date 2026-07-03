@@ -2,3 +2,6 @@ node_modules/
 dist/
 *.zip
 *.xpi
+
+# Distributor-specific baked config (public IDs only; created from config.defaults.example.json)
+config.defaults.json

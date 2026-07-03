@@ -44,6 +44,35 @@ npm run build:chrome     # single target
 npm run build:firefox
 ```
 
+### Baked-in default configuration (prepopulating settings)
+
+For self-distribution you can ship the extension with the MCP URL, Entra
+tenant/client/scopes, and default model already filled in, so users don't have
+to type them after install. These are **defaults** — users can still override
+any field on the Settings page.
+
+Provide values via a `config.defaults.json` file (gitignored; copy
+`config.defaults.example.json`) and/or environment variables, then build:
+
+```bash
+# Option 1: config.defaults.json (copy the example and edit)
+cp config.defaults.example.json config.defaults.json
+npm run build
+
+# Option 2: environment variables (override / supplement the JSON)
+MCP_SERVER_URL=https://host/mcp \
+ENTRA_TENANT_ID=<tenant-guid> \
+ENTRA_CLIENT_ID=<spa-app-client-id> \
+ENTRA_SCOPES=api://<mcp-api-app-id>/MCP.Access \
+LLM_MODEL=gpt-4o-mini \
+npm run build
+```
+
+The build writes the values into `dist/<browser>/src/config.baked.js`. At
+runtime the effective config is merged with precedence
+**stored (user) > baked defaults > built-in defaults**, and prefilled fields are
+marked on the Settings page while remaining editable.
+
 ### Load unpacked (development)
 
 * **Chrome/Edge:** `chrome://extensions` → enable *Developer mode* → *Load unpacked* →
@@ -80,6 +109,14 @@ Open the extension's **Settings** (the ⚙ button in the panel, or the extension
    add the MCP API's `MCP.Access` scope and grant consent.
 3. Put the extension app's client ID and the `api://…/MCP.Access` scope into Settings.
 
+**Per-user tool scoping (optional).** To limit which MCP tools a signed-in user
+can access, define **App Roles** on the *MCP server API app* (e.g.
+`Buildium.ReadOnly`, `Buildium.Operator`, `Buildium.Admin`), assign users/groups
+to them, and configure `BUILDIUM_ENTRA_ROLE_POLICY_MAP` on the server. The
+extension needs no changes — the server narrows the advertised and callable
+tools per user based on the `roles` claim. See the
+[server security docs](../docs/security-and-audit.md#per-user-scoping-with-entra-app-roles).
+
 The server must allow the extension's origin via CORS
 (`BUILDIUM_CORS_ALLOW_ORIGINS=chrome-extension://<id>,moz-extension://<id>`). Entra's token
 endpoint supports CORS for SPA-registered redirect URIs, so token exchange works from the
@@ -111,6 +148,10 @@ MCP_TEST_URL=http://localhost:8000/mcp MCP_TEST_TOKEN=dev-token npm test -- inte
 * PKCE (S256) + a random `state` protect the authorization code exchange.
 * Strict MV3 CSP (`script-src 'self'`); no remote code, no `eval`.
 * Permissions are minimal: `storage`, `identity`, and (Chrome) `sidePanel`.
+* **Session resilience:** if a chat request is rejected with a `401` because the
+  cached access token has gone stale, the client silently mints a fresh token
+  and retries once before surfacing a "Session expired" message, so a stale
+  cache no longer forces an immediate sign-out mid-conversation.
 
 ## Packaging
 

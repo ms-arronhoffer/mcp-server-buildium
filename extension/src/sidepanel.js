@@ -102,7 +102,7 @@ async function ensureReady() {
     return false;
   }
   hideBanner();
-  chat = new ChatClient(config, () => getAccessToken(config));
+  chat = new ChatClient(config, (opts) => getAccessToken(config, opts));
   await refreshSignInState();
   return true;
 }

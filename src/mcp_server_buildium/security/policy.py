@@ -30,6 +30,10 @@ from ..tools import _common as c
 ROLES = frozenset({"readonly", "operator", "admin", "custom"})
 DEFAULT_ROLE = "admin"
 
+# Relative permissiveness of the coarse roles an Entra identity may map to. Used
+# to pick the most permissive role when a caller matches several App Roles/groups.
+ROLE_RANK = {"readonly": 1, "operator": 2, "admin": 3}
+
 # Tools that only the ``admin`` role (or an explicit allow-list entry) may use,
 # regardless of their read/write classification.
 ADMIN_ONLY_TOOLS = frozenset({"audit_summary"})
@@ -66,6 +70,7 @@ class ToolPolicy:
     block_sensitive: bool = False
     allow_tools: frozenset[str] = field(default_factory=frozenset)
     deny_tools: frozenset[str] = field(default_factory=frozenset)
+    deny_all: bool = False
 
     def __post_init__(self) -> None:
         if self.role not in ROLES:
@@ -98,6 +103,9 @@ class ToolPolicy:
 
     def decide(self, tool_name: str) -> PolicyDecision:
         """Return a :class:`PolicyDecision` for ``tool_name``."""
+        if self.deny_all:
+            return PolicyDecision(False, "no permitted role for this identity")
+
         op_type = _op_type(tool_name)
         sensitive = _sensitive(tool_name)
 
@@ -147,6 +155,72 @@ def _split_csv(value: str | None) -> list[str]:
     if not value:
         return []
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+# A shared deny-everything policy for identities that match no configured role.
+DENY_ALL = ToolPolicy(role="custom", deny_all=True)
+
+
+@dataclass
+class CombinedPolicy:
+    """Intersect several policies: a tool is allowed only if *all* allow it.
+
+    Used to narrow the server-wide (process) policy by a per-request policy
+    derived from the caller's Entra App Role, without collapsing the two grants
+    into a single role. The first policy to deny wins, mirroring the
+    most-restrictive-rule-wins semantics of :class:`ToolPolicy`.
+    """
+
+    policies: tuple[ToolPolicy, ...]
+
+    def decide(self, tool_name: str) -> PolicyDecision:
+        for policy in self.policies:
+            decision = policy.decide(tool_name)
+            if not decision.allowed:
+                return decision
+        return PolicyDecision(True, "allowed by all policies")
+
+    def is_allowed(self, tool_name: str) -> bool:
+        return self.decide(tool_name).allowed
+
+
+def _claim_values(claims: dict) -> set[str]:
+    """Collect App Role and group identifiers from verified token claims."""
+    values: set[str] = set()
+    for key in ("roles", "groups"):
+        raw = claims.get(key)
+        if isinstance(raw, str):
+            values.add(raw)
+        elif isinstance(raw, (list, tuple)):
+            values.update(str(item) for item in raw)
+    return values
+
+
+def _most_permissive(roles: list[str]) -> str:
+    """Return the most permissive coarse role from a non-empty list."""
+    return max(roles, key=lambda r: ROLE_RANK.get(r, 0))
+
+
+def effective_policy_for_claims(
+    base: ToolPolicy,
+    role_map: dict[str, str] | None,
+    claims: dict,
+) -> ToolPolicy | CombinedPolicy:
+    """Resolve the per-request policy for a caller from their token claims.
+
+    When ``role_map`` is empty/None the base (server-wide) policy is returned
+    unchanged, preserving today's behavior. Otherwise the caller's ``roles``/
+    ``groups`` claims are mapped to a coarse role and intersected with the base
+    policy (server ceiling ∩ user grant). Callers matching no mapped role/group
+    are denied every tool.
+    """
+    if not role_map:
+        return base
+    values = _claim_values(claims or {})
+    matched = [role_map[v] for v in values if v in role_map]
+    if not matched:
+        return DENY_ALL
+    return CombinedPolicy((base, ToolPolicy(role=_most_permissive(matched))))
 
 
 class RateLimiter:
