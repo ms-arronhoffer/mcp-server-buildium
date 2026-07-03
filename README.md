@@ -157,9 +157,16 @@ When `BUILDIUM_ENTRA_TENANT_ID` and `BUILDIUM_ENTRA_AUDIENCE` are set, every MCP
 request must carry a valid Entra access token in the `Authorization` header
 (using the `Bearer` scheme).
 The server verifies the token's **signature** (against Entra's rotating JWKS),
-**issuer**, **audience**, **expiry**, and any **required scopes**. The issuer and
-JWKS URI are derived from the tenant ID unless overridden with
-`BUILDIUM_ENTRA_ISSUER` / `BUILDIUM_ENTRA_JWKS_URI`.
+**issuer**, **audience**, **expiry**, and any **required scopes**. The JWKS URI is
+derived from the tenant ID unless overridden with `BUILDIUM_ENTRA_JWKS_URI`.
+
+For the **issuer**, both the v2.0 issuer
+(`https://login.microsoftonline.com/<tenant>/v2.0`) and the v1.0 issuer
+(`https://sts.windows.net/<tenant>/`) are accepted by default. Entra mints v1 or
+v2 access tokens for the same app registration depending on the API app's
+`accessTokenAcceptedVersion` manifest setting (default `null` == v1), so
+accepting both avoids a common cause of `401` / "session expired" errors. Set
+`BUILDIUM_ENTRA_ISSUER` to pin a single accepted issuer if you need to.
 
 **Auth precedence:** Entra ID → static bearer token (`BUILDIUM_MCP_AUTH_TOKEN`,
 useful for local/dev) → none (stdio default).

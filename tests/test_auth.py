@@ -9,7 +9,11 @@ from fastmcp.server.auth.providers.jwt import (
     StaticTokenVerifier,
 )
 
-from mcp_server_buildium.auth import build_auth, build_entra_verifier
+from mcp_server_buildium.auth import (
+    MultiIssuerJWTVerifier,
+    build_auth,
+    build_entra_verifier,
+)
 from mcp_server_buildium.config import BuildiumConfig
 
 _BASE = {"client_id": "cid", "client_secret": "secret"}
@@ -60,8 +64,24 @@ def test_entra_verifier_configuration() -> None:
     )
     verifier = build_entra_verifier(cfg)
     assert verifier.audience == "api://app-guid"
-    assert verifier.issuer == "https://login.microsoftonline.com/tid-123/v2.0"
+    # No single issuer is set; both the v1 and v2 Entra issuers are accepted.
+    assert verifier.issuer is None
+    assert verifier.accepted_issuers == [
+        "https://login.microsoftonline.com/tid-123/v2.0",
+        "https://sts.windows.net/tid-123/",
+    ]
     assert verifier.required_scopes == ["MCP.Access"]
+
+
+def test_entra_verifier_explicit_issuer_is_sole_accepted() -> None:
+    cfg = BuildiumConfig(
+        **_BASE,
+        entra_tenant_id="tid-123",
+        entra_audience="api://app-guid",
+        entra_issuer="https://custom.example.com/issuer",
+    )
+    verifier = build_entra_verifier(cfg)
+    assert verifier.accepted_issuers == ["https://custom.example.com/issuer"]
 
 
 @pytest.fixture(scope="module")
@@ -133,5 +153,51 @@ async def test_missing_required_scope_rejected(key_pair: RSAKeyPair) -> None:
         audience="api://app",
         subject="user-1",
         scopes=["Other.Scope"],
+    )
+    assert await verifier.verify_token(token) is None
+
+
+def _multi_issuer_verifier(key_pair: RSAKeyPair, **kwargs: object) -> MultiIssuerJWTVerifier:
+    """Build a MultiIssuerJWTVerifier trusting ``key_pair`` for both Entra issuers."""
+    return MultiIssuerJWTVerifier(
+        accepted_issuers=[
+            "https://login.microsoftonline.com/tid/v2.0",
+            "https://sts.windows.net/tid/",
+        ],
+        public_key=key_pair.public_key,
+        audience="api://app",
+        **kwargs,
+    )
+
+
+@pytest.mark.asyncio
+async def test_multi_issuer_accepts_v2_token(key_pair: RSAKeyPair) -> None:
+    verifier = _multi_issuer_verifier(key_pair)
+    token = key_pair.create_token(
+        issuer="https://login.microsoftonline.com/tid/v2.0",
+        audience="api://app",
+        subject="user-1",
+    )
+    assert await verifier.verify_token(token) is not None
+
+
+@pytest.mark.asyncio
+async def test_multi_issuer_accepts_v1_token(key_pair: RSAKeyPair) -> None:
+    verifier = _multi_issuer_verifier(key_pair)
+    token = key_pair.create_token(
+        issuer="https://sts.windows.net/tid/",
+        audience="api://app",
+        subject="user-1",
+    )
+    assert await verifier.verify_token(token) is not None
+
+
+@pytest.mark.asyncio
+async def test_multi_issuer_rejects_unknown_issuer(key_pair: RSAKeyPair) -> None:
+    verifier = _multi_issuer_verifier(key_pair)
+    token = key_pair.create_token(
+        issuer="https://evil.example.com/v2.0",
+        audience="api://app",
+        subject="user-1",
     )
     assert await verifier.verify_token(token) is None
