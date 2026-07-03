@@ -53,3 +53,6 @@ openapi-generator-cli.jar
 # OS
 .DS_Store
 Thumbs.db
+
+# Local mock API SQLite databases
+mockapi*.db
