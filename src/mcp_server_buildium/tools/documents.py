@@ -25,6 +25,14 @@ from typing import Any, get_args, get_origin
 from fastmcp import FastMCP
 
 from ..buildium_client import BuildiumClient
+from ..llm.artifacts import (
+    SUPPORTED_FORMATS,
+    ArtifactError,
+    Section,
+    Slide,
+    add_current_artifact,
+    build_generated_file,
+)
 from ..llm.attachments import get_current_attachment, list_current_attachment_names
 from . import _common as c
 
@@ -159,11 +167,54 @@ def _describe_model_fields(model_cls: Any) -> list[dict[str, Any]]:
     return fields
 
 
+def _coerce_sections(raw: Any) -> list[Section]:
+    """Coerce a caller-supplied ``sections`` value into :class:`Section` objects."""
+    out: list[Section] = []
+    if not isinstance(raw, list):
+        return out
+    for item in raw:
+        if isinstance(item, dict):
+            out.append(
+                Section(
+                    heading=str(item.get("heading") or item.get("title") or ""),
+                    body=str(item.get("body") or item.get("text") or ""),
+                )
+            )
+        elif item is not None:
+            out.append(Section(heading="", body=str(item)))
+    return out
+
+
+def _coerce_slides(raw: Any) -> list[Slide]:
+    """Coerce a caller-supplied ``slides`` value into :class:`Slide` objects."""
+    out: list[Slide] = []
+    if not isinstance(raw, list):
+        return out
+    for item in raw:
+        if isinstance(item, dict):
+            bullets_raw = item.get("bullets") or item.get("points") or item.get("body") or []
+            if isinstance(bullets_raw, str):
+                bullets = [line for line in bullets_raw.split("\n") if line.strip()]
+            elif isinstance(bullets_raw, list):
+                bullets = [str(b) for b in bullets_raw]
+            else:
+                bullets = []
+            out.append(
+                Slide(title=str(item.get("title") or item.get("heading") or ""), bullets=bullets)
+            )
+        elif item is not None:
+            out.append(Slide(title=str(item), bullets=[]))
+    return out
+
+
 def register_document_tools(mcp: FastMCP, client: BuildiumClient) -> None:
     """Register document-intake helper tools with the MCP server."""
 
     c.register_local_tool("describe_create_schema", op_type="read", sensitive=False)
     c.register_local_tool("list_uploaded_documents", op_type="read", sensitive=False)
+    # Generating a downloadable file only reads the content the assistant passes
+    # in and returns bytes to the user; it does not mutate Buildium data.
+    c.register_local_tool("create_download_file", op_type="read", sensitive=False)
     # Saving an uploaded document to Buildium mutates data and issues a file
     # upload, so it is classified as a sensitive write.
     c.register_local_tool("save_uploaded_document", op_type="write", sensitive=True)
@@ -228,6 +279,85 @@ def register_document_tools(mcp: FastMCP, client: BuildiumClient) -> None:
         return c.success({"documents": list_current_attachment_names()})
 
     @mcp.tool()
+    async def create_download_file(
+        file_format: str,
+        filename: str | None = None,
+        title: str | None = None,
+        columns: list[str] | None = None,
+        rows: list[list[Any]] | None = None,
+        sections: list[dict[str, Any]] | None = None,
+        slides: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Generate a downloadable file for the user (CSV, Excel, Word, PDF, or PowerPoint).
+
+        Use this when the user asks to export, download, or save data as a file —
+        for example "save me a spreadsheet of my active leases", "create slides of
+        my top properties", or "make a PDF report". Gather the data first with the
+        appropriate ``list_*``/``get_*`` tools, then pass it here. The generated
+        file is returned to the user as a download link in the chat; you do not
+        need to (and cannot) include the file contents in your reply.
+
+        Provide the content that fits the format:
+
+        * Tabular formats (``csv``, ``xlsx``): supply ``columns`` (header names)
+          and ``rows`` (each row a list of values aligned to the columns).
+        * Document formats (``docx``, ``pdf``): supply ``sections`` (a list of
+          ``{"heading", "body"}`` objects) and/or a ``columns``/``rows`` table.
+        * Slide decks (``pptx``): supply ``slides`` (a list of
+          ``{"title", "bullets": [..]}`` objects). A ``columns``/``rows`` table
+          is turned into a data slide when no slides are given.
+
+        Args:
+            file_format: One of ``csv``, ``xlsx``, ``docx``, ``pdf``, ``pptx``.
+            filename: Optional base file name (the correct extension is added).
+            title: Optional document/spreadsheet/deck title.
+            columns: Header row for tabular content.
+            rows: Data rows aligned to ``columns``.
+            sections: Narrative sections for ``docx``/``pdf``.
+            slides: Slides for ``pptx``.
+        """
+        fmt = (file_format or "").strip().lower()
+        if fmt not in SUPPORTED_FORMATS:
+            return c.failure(
+                f"Unsupported format {file_format!r}. "
+                f"Supported formats: {', '.join(sorted(SUPPORTED_FORMATS))}.",
+                code="validation_error",
+                hint="Choose one of: csv, xlsx, docx, pdf, pptx.",
+            )
+        try:
+            generated = build_generated_file(
+                file_format=fmt,
+                filename=filename,
+                title=title,
+                columns=columns,
+                rows=rows,
+                sections=_coerce_sections(sections),
+                slides=_coerce_slides(slides),
+            )
+        except ArtifactError as exc:
+            return c.failure(str(exc), code="validation_error")
+
+        # Publish the file so the /chat route streams it to the browser as a
+        # downloadable artifact after this turn completes.
+        add_current_artifact(generated)
+        return c.success(
+            {
+                "generated": True,
+                "file_name": generated.name,
+                "format": fmt,
+                "media_type": generated.media_type,
+                "size_bytes": generated.size,
+            },
+            meta={
+                "hint": (
+                    "The file was generated and offered to the user as a download "
+                    "link. Tell the user it is ready to download; do not paste its "
+                    "contents into the reply."
+                )
+            },
+        )
+
+    @mcp.tool()
     async def save_uploaded_document(
         file_name: str,
         entity_type: str,
@@ -288,15 +418,15 @@ def register_document_tools(mcp: FastMCP, client: BuildiumClient) -> None:
                 upload_request,
                 resource="save_uploaded_document",
             )
-            ticket = await client.files_api.external_api_files_uploads_create_upload_file_request_async(
-                file_upload_post_message=message
+            ticket = (
+                await client.files_api.external_api_files_uploads_create_upload_file_request_async(
+                    file_upload_post_message=message
+                )
             )
             bucket_url = getattr(ticket, "bucket_url", None)
             form_data = getattr(ticket, "form_data", None) or {}
             if not bucket_url:
-                raise ValueError(
-                    "Buildium did not return an upload URL for this file."
-                )
+                raise ValueError("Buildium did not return an upload URL for this file.")
             await _post_file_to_storage(bucket_url, form_data, attachment)
             return {
                 "saved": True,
@@ -309,7 +439,9 @@ def register_document_tools(mcp: FastMCP, client: BuildiumClient) -> None:
         return await c.execute("save_uploaded_document", _run)
 
 
-async def _post_file_to_storage(bucket_url: str, form_data: dict[str, Any], attachment: Any) -> None:
+async def _post_file_to_storage(
+    bucket_url: str, form_data: dict[str, Any], attachment: Any
+) -> None:
     """POST the file bytes to Buildium's returned storage URL (S3 presigned POST).
 
     The upload ticket returns a bucket URL plus form fields that must be sent as
@@ -320,12 +452,8 @@ async def _post_file_to_storage(bucket_url: str, form_data: dict[str, Any], atta
     fields: list[tuple[str, tuple[Any, Any, Any]]] = [
         (key, (None, value, None)) for key, value in form_data.items() if value is not None
     ]
-    fields.append(
-        ("file", (attachment.name, attachment.data, attachment.media_type))
-    )
+    fields.append(("file", (attachment.name, attachment.data, attachment.media_type)))
     async with httpx.AsyncClient(timeout=60.0) as http:
         resp = await http.post(bucket_url, files=fields)
     if resp.status_code >= 400:
-        raise ValueError(
-            f"Uploading the file to storage failed ({resp.status_code})."
-        )
+        raise ValueError(f"Uploading the file to storage failed ({resp.status_code}).")

@@ -18,6 +18,7 @@ import {
   fileToAttachment,
   validateFile,
 } from "./attachments.js";
+import { artifactToBlobUrl, formatBytes } from "./downloads.js";
 
 const api = getApi();
 
@@ -131,6 +132,39 @@ function renderAssistantMarkdown(el, text) {
   els.messages.scrollTop = els.messages.scrollHeight;
 }
 
+/**
+ * Append download links for assistant-generated files to a message element.
+ * Each artifact is turned into an object URL and rendered as a download anchor.
+ * @param {HTMLElement} el
+ * @param {Array<{name?:string, media_type?:string, size?:number, data:string}>} artifacts
+ */
+function renderDownloads(el, artifacts) {
+  if (!artifacts || artifacts.length === 0) return;
+  const container = document.createElement("div");
+  container.className = "downloads";
+  for (const artifact of artifacts) {
+    try {
+      const { url, name } = artifactToBlobUrl(artifact);
+      const link = document.createElement("a");
+      link.className = "download-link";
+      link.href = url;
+      link.download = name;
+      link.textContent = `⬇ ${name}`;
+      if (typeof artifact.size === "number") {
+        const size = document.createElement("span");
+        size.className = "download-size";
+        size.textContent = ` (${formatBytes(artifact.size)})`;
+        link.appendChild(size);
+      }
+      container.appendChild(link);
+    } catch {
+      showBanner(`Could not prepare ${artifact.name || "file"} for download.`, true);
+    }
+  }
+  el.appendChild(container);
+  els.messages.scrollTop = els.messages.scrollHeight;
+}
+
 async function refreshSignInState() {
   const signedIn = await isSignedIn();
   els.signin.textContent = signedIn ? "Sign out" : "Sign in";
@@ -176,7 +210,7 @@ async function handleSend(text) {
   let streamed = "";
 
   try {
-    const { content } = await chat.run(history, {
+    const { content, artifacts } = await chat.run(history, {
       onToken: (t) => {
         streamed += t;
         assistantEl.textContent = streamed;
@@ -186,9 +220,12 @@ async function handleSend(text) {
     const finalText = content || streamed;
     if (finalText) {
       renderAssistantMarkdown(assistantEl, finalText);
+    } else if (artifacts && artifacts.length > 0) {
+      assistantEl.textContent = "Here is your file:";
     } else {
       assistantEl.textContent = "(no response)";
     }
+    renderDownloads(assistantEl, artifacts);
     history.push({ role: "assistant", content: finalText });
     setConnection("ok");
   } catch (err) {

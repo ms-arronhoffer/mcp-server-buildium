@@ -63,11 +63,17 @@ export class ChatClient {
    * `history` messages may carry an `attachments` array on the latest user
    * turn (`[{ name, media_type, data }]`, where `data` is base64), which the
    * server reads to extract fields from an uploaded document.
+   *
+   * The server may also stream `artifact` events — files the assistant
+   * generated for the user to download (a CSV of leases, a slide deck, …).
+   * These are collected and returned as `artifacts` so the UI can present a
+   * download link; `onArtifact` is invoked for each as it arrives.
    * @param {Array<{role:string, content:string, attachments?:Array<object>}>} history
    * @param {{onToken?:(t:string)=>void,
    *          onToolCall?:(name:string, args:object)=>void,
-   *          onToolResult?:(name:string, text:string)=>void}} [callbacks]
-   * @returns {Promise<{content:string}>}
+   *          onToolResult?:(name:string, text:string)=>void,
+   *          onArtifact?:(artifact:object)=>void}} [callbacks]
+   * @returns {Promise<{content:string, artifacts:Array<object>}>}
    */
   async run(history, callbacks = {}) {
     let resp = await this._send(history, {});
@@ -88,7 +94,7 @@ export class ChatClient {
       throw new Error(`Chat request failed (${resp.status}): ${text.slice(0, 300)}`);
     }
 
-    let content = "";
+    const state = { content: "", artifacts: [] };
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
@@ -99,22 +105,22 @@ export class ChatClient {
       const lines = buffer.split(/\r?\n/);
       buffer = lines.pop() ?? "";
       for (const line of lines) {
-        content = this._handle(parseServerEvent(line), content, callbacks);
+        this._handle(parseServerEvent(line), state, callbacks);
       }
     }
     // Flush any trailing buffered line.
     if (buffer.trim()) {
-      content = this._handle(parseServerEvent(buffer), content, callbacks);
+      this._handle(parseServerEvent(buffer), state, callbacks);
     }
-    return { content };
+    return { content: state.content, artifacts: state.artifacts };
   }
 
-  /** Dispatch a single decoded event to the callbacks. Returns updated content. */
-  _handle(event, content, callbacks) {
-    if (!event) return content;
+  /** Dispatch a single decoded event, mutating `state` ({content, artifacts}). */
+  _handle(event, state, callbacks) {
+    if (!event) return;
     switch (event.type) {
       case "token":
-        content += event.text || "";
+        state.content += event.text || "";
         if (callbacks.onToken) callbacks.onToken(event.text || "");
         break;
       case "tool_call":
@@ -123,14 +129,17 @@ export class ChatClient {
       case "tool_result":
         if (callbacks.onToolResult) callbacks.onToolResult(event.name, event.text || "");
         break;
+      case "artifact":
+        state.artifacts.push(event);
+        if (callbacks.onArtifact) callbacks.onArtifact(event);
+        break;
       case "done":
-        if (event.content) content = event.content;
+        if (event.content) state.content = event.content;
         break;
       case "error":
         throw new Error(event.message || "Assistant error");
       default:
         break;
     }
-    return content;
   }
 }

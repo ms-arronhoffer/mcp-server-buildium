@@ -273,6 +273,22 @@ Native multimodal support varies by provider: images and PDFs are sent inline to
 providers that accept them, and the server falls back to extracting text (PDF,
 DOCX, and text formats) when a provider can't take a document natively.
 
+#### Generate a file to download
+
+The assistant can also **generate a file for the user to download**. When a user
+asks to export or save data — for example "save me a spreadsheet of my active
+leases", "create slides of my top properties", or "make a PDF report" — the
+assistant gathers the data with the usual `list_*`/`get_*` tools and calls the
+read-only `create_download_file` tool. The generated file is streamed to the
+browser as an `artifact` event and rendered as a download link (⬇) in the chat.
+
+Supported formats: **CSV, Excel (`.xlsx`), Word (`.docx`), PDF, and PowerPoint
+(`.pptx`)**. Files are built entirely with the Python standard library (CSV via
+`csv`; XLSX/DOCX/PPTX as Office Open XML ZIP packages; PDF hand-written), so no
+extra dependencies are introduced. The raw file bytes never go to the model — the
+assistant passes structured content (columns/rows, sections, or slides) and the
+server assembles the file. Generated files are capped at 25 MB.
+
 ### Dev auth bypass (local/mock testing)
 
 To run the HTTP transport locally against the mock API **without** an Entra

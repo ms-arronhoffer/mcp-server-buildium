@@ -6,6 +6,11 @@ import asyncio
 
 from fastmcp import FastMCP
 
+from mcp_server_buildium.llm.artifacts import (
+    current_artifacts,
+    get_current_artifacts,
+    set_current_artifacts,
+)
 from mcp_server_buildium.llm.attachments import (
     Attachment,
     current_attachments,
@@ -175,3 +180,70 @@ def test_save_uploaded_document_invalid_entity_type_errors() -> None:
         current_attachments.reset(token)
     err = _structured(result)["error"]
     assert err["code"] == "validation_error"
+
+
+def test_create_download_file_registers_artifact() -> None:
+    _client, tools = _build_server()
+    token = set_current_artifacts()
+    try:
+        result = asyncio.run(
+            tools["create_download_file"].run(
+                {
+                    "file_format": "csv",
+                    "filename": "active-leases",
+                    "columns": ["Lease", "Rent"],
+                    "rows": [[1, 1225], [2, 1400]],
+                }
+            )
+        )
+        data = _structured(result)["data"]
+        assert data["generated"] is True
+        assert data["file_name"] == "active-leases.csv"
+        assert data["format"] == "csv"
+        # The file was published to the outbound artifact registry.
+        artifacts = get_current_artifacts()
+        assert len(artifacts) == 1
+        assert artifacts[0].name == "active-leases.csv"
+        assert b"Rent" in artifacts[0].data
+    finally:
+        current_artifacts.reset(token)
+
+
+def test_create_download_file_pptx_from_slides() -> None:
+    _client, tools = _build_server()
+    token = set_current_artifacts()
+    try:
+        result = asyncio.run(
+            tools["create_download_file"].run(
+                {
+                    "file_format": "pptx",
+                    "title": "Top Properties",
+                    "slides": [
+                        {"title": "Maple Court", "bullets": ["92% occupancy", "12 units"]},
+                    ],
+                }
+            )
+        )
+        data = _structured(result)["data"]
+        assert data["format"] == "pptx"
+        assert data["file_name"].endswith(".pptx")
+        assert len(get_current_artifacts()) == 1
+    finally:
+        current_artifacts.reset(token)
+
+
+def test_create_download_file_unsupported_format_errors() -> None:
+    _client, tools = _build_server()
+    token = set_current_artifacts()
+    try:
+        result = asyncio.run(
+            tools["create_download_file"].run(
+                {"file_format": "rtf", "columns": ["A"], "rows": [[1]]}
+            )
+        )
+        err = _structured(result)["error"]
+        assert err["code"] == "validation_error"
+        # Nothing should have been registered for an invalid request.
+        assert get_current_artifacts() == []
+    finally:
+        current_artifacts.reset(token)

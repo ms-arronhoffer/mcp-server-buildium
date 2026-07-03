@@ -9,6 +9,16 @@ tool-calling loop lives in :mod:`mcp_server_buildium.llm.agent`.
 from __future__ import annotations
 
 from .agent import ChatEvent, flatten_tool_result, run_chat
+from .artifacts import (
+    ArtifactError,
+    GeneratedFile,
+    Section,
+    Slide,
+    add_current_artifact,
+    build_generated_file,
+    get_current_artifacts,
+    set_current_artifacts,
+)
 from .attachments import (
     Attachment,
     AttachmentError,
@@ -19,16 +29,24 @@ from .attachments import (
 from .base import Completion, LLMProvider, ToolCall, build_provider
 
 __all__ = [
+    "ArtifactError",
     "Attachment",
     "AttachmentError",
     "ChatEvent",
     "Completion",
+    "GeneratedFile",
     "LLMProvider",
+    "Section",
+    "Slide",
     "ToolCall",
+    "add_current_artifact",
+    "build_generated_file",
     "build_provider",
     "flatten_tool_result",
+    "get_current_artifacts",
     "mb_to_bytes",
     "normalize_attachments",
     "run_chat",
+    "set_current_artifacts",
     "set_current_attachments",
 ]

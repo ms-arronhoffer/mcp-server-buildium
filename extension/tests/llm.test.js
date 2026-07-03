@@ -119,6 +119,27 @@ describe("ChatClient", () => {
     vi.unstubAllGlobals();
   });
 
+  it("collects artifact events and returns them", async () => {
+    const sse =
+      'data: {"type":"token","text":"Your file is ready."}\n' +
+      'data: {"type":"done","content":"Your file is ready."}\n' +
+      'data: {"type":"artifact","name":"leases.csv","media_type":"text/csv","size":42,"data":"QUJD"}\n';
+    vi.stubGlobal("fetch", vi.fn(async () => streamResponse(sse)));
+
+    const seen = [];
+    const chat = new ChatClient(config, async () => "t");
+    const { content, artifacts } = await chat.run([{ role: "user", content: "export" }], {
+      onArtifact: (a) => seen.push(a),
+    });
+
+    expect(content).toBe("Your file is ready.");
+    expect(artifacts).toHaveLength(1);
+    expect(artifacts[0].name).toBe("leases.csv");
+    expect(artifacts[0].data).toBe("QUJD");
+    expect(seen).toEqual(artifacts);
+    vi.unstubAllGlobals();
+  });
+
   it("throws on an error event", async () => {
     const sse = 'data: {"type":"error","message":"provider down"}\n';
     vi.stubGlobal("fetch", vi.fn(async () => streamResponse(sse)));

@@ -25,6 +25,14 @@ Supported types: PDF, DOCX, PNG, JPEG, WebP, and plain/CSV/Markdown text (defaul
 10 MB/file, 5 files/turn). See the
 [server README](../README.md#upload-a-document-to-create-records) for details.
 
+The assistant can also **generate a file for you to download**. Ask it to export
+data — for example "save me a spreadsheet of my active leases", "create slides of
+my top properties", or "make a PDF report" — and it gathers the data, builds the
+file, and presents a **download link** (⬇) in the chat so you can save it locally.
+Supported formats: CSV, Excel (`.xlsx`), Word (`.docx`), PDF, and PowerPoint
+(`.pptx`). Files are generated server-side with the standard library (no extra
+dependencies) and streamed to the browser as a download.
+
 ## Architecture
 
 | Module | Responsibility |
@@ -34,8 +42,9 @@ Supported types: PDF, DOCX, PNG, JPEG, WebP, and plain/CSV/Markdown text (defaul
 | `src/mcpClient.js` | MCP Streamable HTTP client (`initialize`, `tools/list`, `tools/call`). |
 | `src/llm.js` | `ChatClient`: streams turns to the server `/chat` SSE endpoint (no keys, no tool loop in the browser). |
 | `src/attachments.js` | Reads attached files to base64, validates type/size, builds message attachments. Pure. |
+| `src/downloads.js` | Turns server `artifact` events into downloadable object URLs (`base64ToBytes`, `formatBytes`). Pure. |
 | `src/config.js` | Settings schema, validation, `storage.local` persistence, endpoint derivation. |
-| `src/sidepanel.*` | Full-height chat UI (Chrome side panel / Firefox sidebar), including the 📎 document-attach composer. |
+| `src/sidepanel.*` | Full-height chat UI (Chrome side panel / Firefox sidebar), including the 📎 document-attach composer and ⬇ download links. |
 | `src/options.*` | Settings page. |
 | `src/background.js` | Opens the side panel on the toolbar action (Chrome). |
 

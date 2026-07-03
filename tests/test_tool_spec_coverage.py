@@ -77,6 +77,7 @@ def test_every_registered_tool_is_mapped_or_local(
         "audit_summary",
         "describe_create_schema",
         "list_uploaded_documents",
+        "create_download_file",
         "save_uploaded_document",
     }
     unmapped = set(registered_tool_names) - set(tool_operations) - server_local
