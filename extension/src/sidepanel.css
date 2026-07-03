@@ -144,6 +144,124 @@ button.link {
   max-width: 95%;
 }
 
+/* Rendered Markdown inside an assistant bubble. */
+.msg.markdown {
+  white-space: normal;
+}
+
+.msg.markdown > :first-child {
+  margin-top: 0;
+}
+
+.msg.markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.msg.markdown h1,
+.msg.markdown h2,
+.msg.markdown h3,
+.msg.markdown h4,
+.msg.markdown h5,
+.msg.markdown h6 {
+  margin: 10px 0 6px;
+  line-height: 1.25;
+}
+
+.msg.markdown h1 {
+  font-size: 1.25em;
+}
+
+.msg.markdown h2 {
+  font-size: 1.15em;
+}
+
+.msg.markdown h3 {
+  font-size: 1.05em;
+}
+
+.msg.markdown p {
+  margin: 6px 0;
+}
+
+.msg.markdown ul,
+.msg.markdown ol {
+  margin: 6px 0;
+  padding-left: 20px;
+}
+
+.msg.markdown li {
+  margin: 2px 0;
+  border-radius: 6px;
+  padding: 1px 4px;
+}
+
+.msg.markdown code {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.9em;
+  background: rgba(127, 127, 127, 0.15);
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+
+.msg.markdown pre {
+  background: rgba(127, 127, 127, 0.12);
+  padding: 8px 10px;
+  border-radius: 8px;
+  overflow-x: auto;
+}
+
+.msg.markdown pre code {
+  background: none;
+  padding: 0;
+}
+
+.msg.markdown a {
+  color: var(--accent);
+}
+
+.msg.markdown table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 8px 0;
+  font-size: 0.95em;
+}
+
+.msg.markdown th,
+.msg.markdown td {
+  border: 1px solid var(--border);
+  padding: 5px 8px;
+  text-align: left;
+}
+
+.msg.markdown th {
+  background: rgba(127, 127, 127, 0.12);
+  font-weight: 600;
+}
+
+/* Clickable rows/items and action links drill into a specific record. */
+.msg.markdown .action-link {
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.msg.markdown .clickable {
+  cursor: pointer;
+}
+
+.msg.markdown li.clickable:hover,
+.msg.markdown tr.clickable:hover {
+  background: var(--user-bg);
+}
+
+.msg.markdown .clickable:focus-visible,
+.msg.markdown .action-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: 4px;
+}
+
 .msg.tool {
   align-self: stretch;
   background: var(--tool-bg);
