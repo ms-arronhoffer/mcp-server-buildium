@@ -2,9 +2,10 @@
  * Extension configuration: defaults, validation, and persistence.
  *
  * Settings are stored in `storage.local` (they are not secrets — tokens live in
- * `storage.session`). Neither the Buildium API key nor the LLM provider API keys
- * ever live in the browser: both stay server-side behind the MCP server, which
- * now also runs the assistant loop and exposes a `/chat` endpoint.
+ * `storage.session`). Neither the property-management API key nor the LLM
+ * provider API keys ever live in the browser: both stay server-side behind the
+ * MCP server, which now also runs the assistant loop and exposes a `/chat`
+ * endpoint.
  */
 
 import { getApi } from "./browser.js";

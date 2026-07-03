@@ -1,7 +1,7 @@
 /**
  * Chat client: talks to the server-side assistant over the `/chat` SSE endpoint.
  *
- * The assistant loop (model calls + Buildium MCP tool execution) now runs on the
+ * The assistant loop (model calls + MCP tool execution) now runs on the
  * server, so provider API keys never reach the browser. This client simply POSTs
  * the conversation, attaches the Entra access token, and translates the server's
  * Server-Sent Events into the callbacks the side panel already understands.

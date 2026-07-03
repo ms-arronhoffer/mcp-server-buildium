@@ -5,7 +5,7 @@
     "type": "module"
   },
   "action": {
-    "default_title": "Open Buildium MCP Sidebar"
+    "default_title": "Open Portfolio Desk AI Assistant"
   },
   "side_panel": {
     "default_path": "src/sidepanel.html"

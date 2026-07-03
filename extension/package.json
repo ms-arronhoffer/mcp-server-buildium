@@ -1,7 +1,7 @@
 {
-  "name": "buildium-mcp-sidebar",
+  "name": "portfolio-desk-ai-assistant",
   "version": "0.1.0",
-  "description": "Full-height side panel chat extension (Chrome/Firefox) that talks to the Buildium MCP server with Microsoft Entra ID authentication and LLM-driven tool use.",
+  "description": "Full-height side panel chat extension (Chrome/Firefox) that talks to your property-management assistant server with Microsoft Entra ID authentication and LLM-driven tool use.",
   "type": "module",
   "private": true,
   "scripts": {
