@@ -66,6 +66,78 @@ class BuildiumConfig(BaseSettings):
         ),
     )
 
+    # --- Transport ---------------------------------------------------------
+    transport: str = Field(
+        default="stdio",
+        description=(
+            "MCP transport to serve. 'stdio' (default) embeds the server in a local "
+            "MCP client (Claude Desktop, Cursor). 'http' serves the Streamable HTTP "
+            "transport over the network so browser extensions and remote clients can "
+            "connect."
+        ),
+    )
+    host: str = Field(
+        default="127.0.0.1",
+        description="Host/interface to bind when transport='http'.",
+    )
+    port: int = Field(
+        default=8000,
+        description="TCP port to listen on when transport='http'.",
+    )
+    mcp_path: str = Field(
+        default="/mcp",
+        description="URL path the Streamable HTTP MCP endpoint is served at.",
+    )
+
+    # --- Microsoft Entra ID (Azure AD) JWT auth ---------------------------
+    entra_tenant_id: str | None = Field(
+        default=None,
+        description=(
+            "Microsoft Entra ID (Azure AD) tenant ID (GUID) or 'common'/'organizations'. "
+            "When set together with entra_audience, incoming MCP requests must present a "
+            "valid Entra-issued JWT access token."
+        ),
+    )
+    entra_audience: str | None = Field(
+        default=None,
+        description=(
+            "Expected audience ('aud') of the Entra access token. Typically the API app "
+            "registration's Application ID URI (e.g. 'api://<app-id>') or its client ID."
+        ),
+    )
+    entra_issuer: str | None = Field(
+        default=None,
+        description=(
+            "Optional explicit token issuer. If not set, it is derived from the tenant ID "
+            "as 'https://login.microsoftonline.com/<tenant>/v2.0'."
+        ),
+    )
+    entra_jwks_uri: str | None = Field(
+        default=None,
+        description=(
+            "Optional explicit JWKS URI for signing-key discovery. If not set, it is "
+            "derived from the tenant ID as "
+            "'https://login.microsoftonline.com/<tenant>/discovery/v2.0/keys'."
+        ),
+    )
+    entra_required_scopes: str | None = Field(
+        default=None,
+        description=(
+            "Optional comma-separated list of scopes ('scp' claim) the token must contain "
+            "(e.g. 'MCP.Access')."
+        ),
+    )
+
+    # --- CORS --------------------------------------------------------------
+    cors_allow_origins: str | None = Field(
+        default=None,
+        description=(
+            "Comma-separated list of allowed CORS origins for the HTTP transport "
+            "(e.g. 'chrome-extension://<id>,moz-extension://<id>'). Use '*' to allow any "
+            "origin. Only applied when transport='http'."
+        ),
+    )
+
     model_config = {
         "env_prefix": "BUILDIUM_",
         "case_sensitive": False,
@@ -83,6 +155,12 @@ class BuildiumConfig(BaseSettings):
             raise ValueError("BUILDIUM_CLIENT_SECRET must be a non-empty value")
         if not self.base_url.startswith(("http://", "https://")):
             raise ValueError("BUILDIUM_BASE_URL must start with http:// or https://")
+        if self.transport.lower() not in {"stdio", "http"}:
+            raise ValueError("BUILDIUM_TRANSPORT must be one of: stdio, http")
+        if self.entra_tenant_id and not self.entra_audience:
+            raise ValueError(
+                "BUILDIUM_ENTRA_AUDIENCE is required when BUILDIUM_ENTRA_TENANT_ID is set"
+            )
         unknown = self.get_enabled_categories()
         if unknown is not None:
             invalid = unknown - ALL_CATEGORIES
@@ -121,3 +199,37 @@ class BuildiumConfig(BaseSettings):
         if enabled is None:
             return True  # All categories enabled
         return category.lower() in enabled
+
+    def entra_enabled(self) -> bool:
+        """Return True when Entra ID JWT verification is configured."""
+        return bool(self.entra_tenant_id and self.entra_audience)
+
+    def get_entra_issuer(self) -> str | None:
+        """Return the expected token issuer, derived from the tenant if unset."""
+        if self.entra_issuer:
+            return self.entra_issuer
+        if self.entra_tenant_id:
+            return f"https://login.microsoftonline.com/{self.entra_tenant_id}/v2.0"
+        return None
+
+    def get_entra_jwks_uri(self) -> str | None:
+        """Return the JWKS URI for signing keys, derived from the tenant if unset."""
+        if self.entra_jwks_uri:
+            return self.entra_jwks_uri
+        if self.entra_tenant_id:
+            return f"https://login.microsoftonline.com/{self.entra_tenant_id}/discovery/v2.0/keys"
+        return None
+
+    def get_entra_scopes(self) -> list[str] | None:
+        """Return required Entra scopes as a list, or None when unset."""
+        if not self.entra_required_scopes:
+            return None
+        scopes = [s.strip() for s in self.entra_required_scopes.split(",") if s.strip()]
+        return scopes or None
+
+    def get_cors_origins(self) -> list[str] | None:
+        """Return allowed CORS origins as a list, or None when unset."""
+        if not self.cors_allow_origins:
+            return None
+        origins = [o.strip() for o in self.cors_allow_origins.split(",") if o.strip()]
+        return origins or None

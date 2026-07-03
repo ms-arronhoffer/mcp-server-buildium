@@ -41,3 +41,36 @@ services:
       BUILDIUM_CLIENT_SECRET: "mock-client-secret"
     stdin_open: true
     tty: true
+
+  # HTTP (Streamable HTTP) transport for remote/browser clients such as the
+  # extension in extension/. In production, terminate TLS at a reverse proxy in
+  # front of this service and set BUILDIUM_ENTRA_* to require Entra ID tokens.
+  #
+  #   docker compose up --build mcp-server-http
+  #
+  mcp-server-http:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mcp-server-buildium:latest
+    depends_on:
+      mockapi:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    environment:
+      BUILDIUM_BASE_URL: "http://mockapi:8080"
+      BUILDIUM_CLIENT_ID: "mock-client-id"
+      BUILDIUM_CLIENT_SECRET: "mock-client-secret"
+      # Serve Streamable HTTP on all interfaces.
+      BUILDIUM_TRANSPORT: "http"
+      BUILDIUM_HOST: "0.0.0.0"
+      BUILDIUM_PORT: "8000"
+      BUILDIUM_MCP_PATH: "/mcp"
+      # Allow the browser extension origin(s). Replace with your extension ID,
+      # or use a dev/static token instead of Entra for local testing.
+      BUILDIUM_CORS_ALLOW_ORIGINS: "*"
+      # Microsoft Entra ID JWT auth (uncomment and fill in for real auth):
+      # BUILDIUM_ENTRA_TENANT_ID: "00000000-0000-0000-0000-000000000000"
+      # BUILDIUM_ENTRA_AUDIENCE: "api://<api-app-client-id>"
+      # BUILDIUM_ENTRA_REQUIRED_SCOPES: "MCP.Access"

@@ -92,6 +92,55 @@ cp .env.example .env
 # Edit .env with your credentials
 ```
 
+### Transport & Remote Access (HTTP + Microsoft Entra ID)
+
+By default the server speaks the **stdio** transport, which embeds it in a local
+MCP client (Claude Desktop, Cursor). To let **remote clients** — such as the
+[browser extension](extension/) — reach it over the network, run the
+**Streamable HTTP** transport and protect it with **Microsoft Entra ID (Azure AD)**
+JWT authentication.
+
+```bash
+# Serve Streamable HTTP instead of stdio
+BUILDIUM_TRANSPORT=http
+BUILDIUM_HOST=0.0.0.0
+BUILDIUM_PORT=8000
+BUILDIUM_MCP_PATH=/mcp
+
+# Require Entra ID access tokens (verified against Entra's JWKS)
+BUILDIUM_ENTRA_TENANT_ID=<tenant-guid>
+BUILDIUM_ENTRA_AUDIENCE=api://<api-app-client-id>
+# Optional required scopes (comma-separated)
+BUILDIUM_ENTRA_REQUIRED_SCOPES=MCP.Access
+
+# Allow the browser extension's origin(s) for CORS
+BUILDIUM_CORS_ALLOW_ORIGINS=chrome-extension://<extension-id>,moz-extension://<extension-id>
+```
+
+When `BUILDIUM_ENTRA_TENANT_ID` and `BUILDIUM_ENTRA_AUDIENCE` are set, every MCP
+request must carry a valid `Authorization: ****** Entra access token.
+The server verifies the token's **signature** (against Entra's rotating JWKS),
+**issuer**, **audience**, **expiry**, and any **required scopes**. The issuer and
+JWKS URI are derived from the tenant ID unless overridden with
+`BUILDIUM_ENTRA_ISSUER` / `BUILDIUM_ENTRA_JWKS_URI`.
+
+**Auth precedence:** Entra ID → static bearer token (`BUILDIUM_MCP_AUTH_TOKEN`,
+useful for local/dev) → none (stdio default).
+
+> **Trust boundary:** the upstream Buildium API key
+> (`BUILDIUM_CLIENT_ID` / `BUILDIUM_CLIENT_SECRET`) never leaves the server. Remote
+> clients authenticate only with Entra tokens and never see Buildium credentials.
+
+**Production:** terminate TLS at a reverse proxy in front of the HTTP service and
+restrict `BUILDIUM_CORS_ALLOW_ORIGINS` to your extension's origin.
+
+Run the HTTP transport with Docker Compose:
+
+```bash
+docker compose up --build mcp-server-http   # serves http://localhost:8000/mcp
+```
+
+
 ## Usage
 
 ### Running the Server

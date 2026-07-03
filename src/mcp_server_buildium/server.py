@@ -4,6 +4,7 @@ from typing import Any
 
 from fastmcp import FastMCP
 
+from .auth import build_auth
 from .buildium_client import BuildiumClient
 from .config import BuildiumConfig
 from .logging_config import configure_logging, get_logger
@@ -31,16 +32,12 @@ logger = get_logger("mcp_server_buildium.server")
 config = BuildiumConfig.from_env()
 buildium_client = BuildiumClient(config=config)
 
-# Optional header-auth passthrough: when a token is configured, MCP clients must
-# present it via the Authorization header.
-auth = None
-if config.mcp_auth_token:
-    from fastmcp.server.auth.providers.jwt import StaticTokenVerifier
-
-    auth = StaticTokenVerifier(
-        tokens={config.mcp_auth_token: {"client_id": "buildium-mcp", "scopes": []}}
-    )
-    logger.info("MCP header-auth passthrough enabled")
+# Optional authentication. Precedence: Entra ID JWT → static bearer token → none.
+# Remote clients (e.g. the browser extension) authenticate with Entra; the upstream
+# Buildium API key never leaves the server.
+auth = build_auth(config)
+if auth is not None:
+    logger.info("MCP authentication enabled (%s)", type(auth).__name__)
 
 # Create FastMCP server
 mcp = FastMCP("buildium", auth=auth)
@@ -77,21 +74,73 @@ async def health_check() -> dict[str, Any]:
     of enabled tool categories. Does not leak secret values.
     """
     enabled = config.get_enabled_categories()
+    if config.entra_enabled():
+        auth_mode = "entra"
+    elif config.mcp_auth_token:
+        auth_mode = "static_token"
+    else:
+        auth_mode = "none"
     data = {
         "status": "ok",
         "server": "buildium",
         "base_url": config.base_url,
         "credentials_configured": bool(config.client_id and config.client_secret),
-        "auth_passthrough_enabled": bool(config.mcp_auth_token),
+        "transport": config.transport,
+        "auth_mode": auth_mode,
         "enabled_categories": sorted(enabled) if enabled is not None else "all",
     }
     return c.success(data)
 
 
+def _build_cors_middleware() -> list:
+    """Build CORS middleware for the HTTP transport from configuration.
+
+    Returns an empty list when no origins are configured so the server does not
+    emit CORS headers by default.
+    """
+    origins = config.get_cors_origins()
+    if not origins:
+        return []
+
+    from starlette.middleware import Middleware
+    from starlette.middleware.cors import CORSMiddleware
+
+    return [
+        Middleware(
+            CORSMiddleware,
+            allow_origins=origins,
+            allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+            allow_headers=["Authorization", "Content-Type", "Mcp-Session-Id"],
+            expose_headers=["Mcp-Session-Id"],
+            allow_credentials="*" not in origins,
+        )
+    ]
+
+
 def main() -> None:
-    """Run the MCP server (stdio by default)."""
-    logger.info("Starting Buildium MCP server")
-    mcp.run()
+    """Run the MCP server.
+
+    Defaults to the ``stdio`` transport (embedded in a local MCP client). When
+    ``BUILDIUM_TRANSPORT=http`` the server serves the Streamable HTTP transport so
+    remote clients — such as the browser extension — can connect over the network.
+    """
+    if config.transport.lower() == "http":
+        logger.info(
+            "Starting Buildium MCP server (http) on %s:%s%s",
+            config.host,
+            config.port,
+            config.mcp_path,
+        )
+        mcp.run(
+            transport="http",
+            host=config.host,
+            port=config.port,
+            path=config.mcp_path,
+            middleware=_build_cors_middleware(),
+        )
+    else:
+        logger.info("Starting Buildium MCP server (stdio)")
+        mcp.run()
 
 
 if __name__ == "__main__":
