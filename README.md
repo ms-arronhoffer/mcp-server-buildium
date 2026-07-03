@@ -177,6 +177,57 @@ Run the HTTP transport with Docker Compose:
 docker compose up --build mcp-server-http   # serves http://localhost:8000/mcp
 ```
 
+### Server-side LLM assistant (`/chat`)
+
+The HTTP transport also exposes a **server-side assistant** so provider API keys
+stay on the server and are **never** shipped to the browser extension. The
+extension is a thin client: it POSTs chat turns to `/chat` (authenticated with
+the user's Entra token) and streams back tokens and tool events over SSE. The
+tool-calling loop and the provider call both run in-process on the server.
+
+Three providers are supported via a server-side adapter layer:
+
+| Provider | Wire API | Key env var |
+| --- | --- | --- |
+| OpenAI | Chat Completions | `BUILDIUM_LLM_OPENAI_API_KEY` |
+| Anthropic | Messages API | `BUILDIUM_LLM_ANTHROPIC_API_KEY` |
+| Google Gemini | `generateContent` | `BUILDIUM_LLM_GEMINI_API_KEY` |
+
+Select the active provider and default model, and (optionally) an allow-list of
+models a client may request:
+
+```bash
+BUILDIUM_LLM_PROVIDER=openai            # openai | anthropic | gemini
+BUILDIUM_LLM_MODEL=gpt-4o-mini          # required when a provider is set
+BUILDIUM_LLM_ALLOWED_MODELS=gpt-4o-mini,gpt-4o   # optional; default must be a member
+BUILDIUM_LLM_OPENAI_API_KEY=sk-...      # matches the selected provider
+```
+
+`/chat` is protected by the **same Entra JWT auth as `/mcp`**, so only signed-in
+users reach the keyed provider calls (and every turn is audited). A companion
+`GET /capabilities` endpoint returns only **non-secret** metadata — whether the
+assistant is enabled, the provider name, and the selectable model names — so the
+extension can populate a model dropdown. **No endpoint ever emits key material.**
+
+> **Breaking change:** the previous "bring-your-own-key in the browser" flow is
+> removed. Provider keys now live only in server config/secrets; the extension no
+> longer stores an LLM API base, key, or free-text model.
+
+### Dev auth bypass (local/mock testing)
+
+To run the HTTP transport locally against the mock API **without** an Entra
+tenant or token, set:
+
+```bash
+BUILDIUM_DEV_AUTH_BYPASS=true
+```
+
+This disables **all** authentication on `/mcp`, `/chat`, and `/capabilities`.
+It is intended only for local development and mock testing — **never enable it on
+a network-reachable or production deployment.** The `docker compose`
+`mcp-server-http` service enables it by default so the extension can connect to
+the seeded mock API out of the box.
+
 
 ## Usage
 
