@@ -1,6 +1,9 @@
 """Buildium API client using the generated SDK."""
 
+import logging
+
 from .config import BuildiumConfig
+from .logging_config import get_logger
 from .sdk_imports import (  # noqa: E402
     ApiClient,
     ApplicantsApi,
@@ -10,20 +13,33 @@ from .sdk_imports import (  # noqa: E402
     AssociationUnitsApi,
     BankAccountsApi,
     BillsApi,
+    BoardMembersApi,
     Configuration,
     FilesApi,
+    GeneralLedgerApi,
     LeasesApi,
+    LeaseTransactionsApi,
+    ListingsApi,
+    OwnershipAccountsApi,
     RentalOwnersApi,
     RentalPropertiesApi,
     RentalTenantsApi,
     RentalUnitsApi,
     TasksApi,
     VendorsApi,
+    WorkOrdersApi,
 )
+
+logger = get_logger(__name__)
 
 
 class BuildiumClient:
-    """Buildium API client using the generated SDK with API key headers authentication."""
+    """Buildium API client using the generated SDK with API key header authentication.
+
+    Buildium authenticates server-to-server requests using two request headers,
+    ``x-buildium-client-id`` and ``x-buildium-client-secret`` (an API key pair,
+    not OAuth 2.0).
+    """
 
     def __init__(self, config: BuildiumConfig | None = None):
         """Initialize the Buildium client.
@@ -40,8 +56,12 @@ class BuildiumClient:
 
         # Initialize API clients
         self.associations_api = AssociationsApi(self._api_client)
+        self.board_members_api = BoardMembersApi(self._api_client)
+        self.ownership_accounts_api = OwnershipAccountsApi(self._api_client)
         self.leases_api = LeasesApi(self._api_client)
+        self.lease_transactions_api = LeaseTransactionsApi(self._api_client)
         self.rentals_api = RentalPropertiesApi(self._api_client)
+        self.listings_api = ListingsApi(self._api_client)
         self.applicants_api = ApplicantsApi(self._api_client)
         self.rental_tenants_api = RentalTenantsApi(self._api_client)
         self.association_tenants_api = AssociationTenantsApi(self._api_client)
@@ -54,6 +74,8 @@ class BuildiumClient:
         self.bills_api = BillsApi(self._api_client)
         self.files_api = FilesApi(self._api_client)
         self.bank_accounts_api = BankAccountsApi(self._api_client)
+        self.general_ledger_api = GeneralLedgerApi(self._api_client)
+        self.work_orders_api = WorkOrdersApi(self._api_client)
 
     def _initialize_sdk(self) -> None:
         """Initialize the SDK configuration and API client with API key headers."""
@@ -70,23 +92,22 @@ class BuildiumClient:
         self._api_client.set_default_header("x-buildium-client-id", self.config.client_id)
         self._api_client.set_default_header("x-buildium-client-secret", self.config.client_secret)
 
-        # Log initialization details
-        import logging
-
-        logger = logging.getLogger(__name__)
-        logger.debug("Initialized Buildium client:")
-        logger.debug("  Base URL: %s", base_url)
-        logger.debug("  Default headers: %s", self._api_client.default_headers)
+        # Log initialization details (never log secret values)
+        logger.log(logging.DEBUG, "Initialized Buildium client base_url=%s", base_url)
 
     async def close(self) -> None:
-        """Close the API client."""
-        if self._api_client:
-            await self._api_client.close()
+        """Close the API client and release network resources."""
+        if self._api_client is not None:
+            close = getattr(self._api_client, "close", None)
+            if close is not None:
+                result = close()
+                if hasattr(result, "__await__"):
+                    await result
 
-    def __enter__(self):
-        """Context manager entry."""
+    async def __aenter__(self) -> "BuildiumClient":
+        """Async context manager entry."""
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit."""
-        self.close()
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Async context manager exit."""
+        await self.close()

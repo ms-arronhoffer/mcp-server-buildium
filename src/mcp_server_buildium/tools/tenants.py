@@ -5,155 +5,127 @@ from typing import Any
 from fastmcp import FastMCP
 
 from ..buildium_client import BuildiumClient
+from . import _common as c
 
 
 def register_tenant_tools(mcp: FastMCP, client: BuildiumClient) -> None:
-    """Register tenant-related tools with the MCP server.
+    """Register tenant-related tools with the MCP server."""
 
-    Args:
-        mcp: FastMCP server instance.
-        client: Buildium client instance.
-    """
+    c.register_operation("list_rental_tenants", "ExternalApiRentalTenants_GetAllTenants")
+    c.register_operation("get_rental_tenant", "ExternalApiRentalTenants_GetTenantById")
+    c.register_operation("create_rental_tenant", "ExternalApiRentalTenants_CreateRentalTenant")
+    c.register_operation("update_rental_tenant", "ExternalApiRentalTenants_UpdateRentalTenant")
+    c.register_operation(
+        "list_association_tenants", "ExternalApiAssociationTenants_GetAssociationTenants"
+    )
+    c.register_operation(
+        "create_association_tenant", "ExternalApiAssociationTenants_CreateAssociationTenant"
+    )
+    c.register_operation(
+        "update_association_tenant", "ExternalApiAssociationTenants_UpdateAssociationTenant"
+    )
 
     # Rental Tenants
     @mcp.tool()
     async def list_rental_tenants(
         property_id: int | None = None,
         unit_id: int | None = None,
-        status: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> dict[str, Any]:
-        """List rental tenants from Buildium."""
-        # Build kwargs, only including optional parameters if they have values
-        kwargs = {
-            "limit": limit,
-            "offset": offset,
-        }
+        """List rental tenants from Buildium, optionally filtered by property/unit."""
+        limit, offset = c.clamp_pagination(limit, offset)
+        kwargs: dict[str, Any] = {"limit": limit, "offset": offset}
         if property_id is not None:
-            kwargs["propertyid"] = property_id
+            kwargs["propertyids"] = [property_id]
         if unit_id is not None:
-            kwargs["unitid"] = unit_id
-        if status is not None:
-            kwargs["status"] = status
-
-        result = await client.rental_tenants_api.external_api_rental_tenants_get_all_tenants(
-            **kwargs
+            kwargs["unitids"] = [unit_id]
+        return await c.execute(
+            "list_rental_tenants",
+            lambda: client.rental_tenants_api.external_api_rental_tenants_get_all_tenants(**kwargs),
         )
-        if hasattr(result, "to_dict"):
-            return result.to_dict()
-        return result if isinstance(result, dict) else {"tenants": result, "count": len(result)}
 
     @mcp.tool()
     async def get_rental_tenant(tenant_id: int) -> dict[str, Any]:
         """Get a specific rental tenant by ID."""
-        result = await client.rental_tenants_api.external_api_rental_tenants_get_tenant_by_id(
-            tenant_id=tenant_id
+        return await c.execute(
+            "get_rental_tenant",
+            lambda: client.rental_tenants_api.external_api_rental_tenants_get_tenant_by_id(
+                tenant_id=tenant_id
+            ),
         )
-        if hasattr(result, "to_dict"):
-            return result.to_dict()
-        return result if isinstance(result, dict) else result
 
     @mcp.tool()
     async def create_rental_tenant(tenant_data: dict[str, Any]) -> dict[str, Any]:
         """Create a new rental tenant."""
-        try:
-            from mcp_server_buildium.buildium_sdk.models.rental_tenant_post_message import (
-                RentalTenantPostMessage,
-            )
-
-            tenant_message = RentalTenantPostMessage(**tenant_data)
-        except ImportError:
-            tenant_message = tenant_data
-
-        result = await client.rental_tenants_api.external_api_rental_tenants_create_rental_tenant(
-            rental_tenant_post_message=tenant_message
+        message = c.build_model(
+            "rental_tenant_post_message", "RentalTenantPostMessage", tenant_data
         )
-        if hasattr(result, "to_dict"):
-            return result.to_dict()
-        return result if isinstance(result, dict) else result
+        return await c.execute(
+            "create_rental_tenant",
+            lambda: client.rental_tenants_api.external_api_rental_tenants_create_rental_tenant(
+                rental_tenant_post_message=message
+            ),
+        )
 
     @mcp.tool()
     async def update_rental_tenant(tenant_id: int, tenant_data: dict[str, Any]) -> dict[str, Any]:
         """Update an existing rental tenant."""
-        try:
-            from mcp_server_buildium.buildium_sdk.models.rental_tenant_put_message import (
-                RentalTenantPutMessage,
-            )
-
-            tenant_message = RentalTenantPutMessage(**tenant_data)
-        except ImportError:
-            tenant_message = tenant_data
-
-        result = await client.rental_tenants_api.external_api_rental_tenants_update_rental_tenant(
-            tenant_id=tenant_id, rental_tenant_put_message=tenant_message
+        message = c.build_model("rental_tenant_put_message", "RentalTenantPutMessage", tenant_data)
+        return await c.execute(
+            "update_rental_tenant",
+            lambda: client.rental_tenants_api.external_api_rental_tenants_update_rental_tenant(
+                tenant_id=tenant_id, rental_tenant_put_message=message
+            ),
         )
-        if hasattr(result, "to_dict"):
-            return result.to_dict()
-        return result if isinstance(result, dict) else result
 
     # Association Tenants
     @mcp.tool()
     async def list_association_tenants(
-        property_id: int | None = None,
-        status: str | None = None,
-        limit: int = 100,
-        offset: int = 0,
+        association_id: int | None = None, limit: int = 100, offset: int = 0
     ) -> dict[str, Any]:
-        """List association tenants from Buildium."""
-        # Build kwargs, only including optional parameters if they have values
-        kwargs = {
-            "limit": limit,
-            "offset": offset,
-        }
-        if property_id is not None:
-            kwargs["propertyid"] = property_id
-        if status is not None:
-            kwargs["status"] = status
-
-        result = await client.association_tenants_api.external_api_association_tenants_get_association_tenants(
-            **kwargs
+        """List association tenants from Buildium, optionally filtered by association."""
+        limit, offset = c.clamp_pagination(limit, offset)
+        kwargs: dict[str, Any] = {"limit": limit, "offset": offset}
+        if association_id is not None:
+            kwargs["associationids"] = [association_id]
+        return await c.execute(
+            "list_association_tenants",
+            lambda: (
+                client.association_tenants_api.external_api_association_tenants_get_association_tenants(
+                    **kwargs
+                )
+            ),
         )
-        if hasattr(result, "to_dict"):
-            return result.to_dict()
-        return result if isinstance(result, dict) else {"tenants": result, "count": len(result)}
 
     @mcp.tool()
     async def create_association_tenant(tenant_data: dict[str, Any]) -> dict[str, Any]:
         """Create a new association tenant."""
-        try:
-            from mcp_server_buildium.buildium_sdk.models.association_tenant_post_message import (
-                AssociationTenantPostMessage,
-            )
-
-            tenant_message = AssociationTenantPostMessage(**tenant_data)
-        except ImportError:
-            tenant_message = tenant_data
-
-        result = await client.association_tenants_api.external_api_association_tenants_create_association_tenant(
-            association_tenant_post_message=tenant_message
+        message = c.build_model(
+            "association_tenant_post_message", "AssociationTenantPostMessage", tenant_data
         )
-        if hasattr(result, "to_dict"):
-            return result.to_dict()
-        return result if isinstance(result, dict) else result
+        return await c.execute(
+            "create_association_tenant",
+            lambda: (
+                client.association_tenants_api.external_api_association_tenants_create_association_tenant(
+                    association_tenant_post_message=message
+                )
+            ),
+        )
 
     @mcp.tool()
     async def update_association_tenant(
         tenant_id: int, tenant_data: dict[str, Any]
     ) -> dict[str, Any]:
         """Update an existing association tenant."""
-        try:
-            from mcp_server_buildium.buildium_sdk.models.association_tenant_put_message import (
-                AssociationTenantPutMessage,
-            )
-
-            tenant_message = AssociationTenantPutMessage(**tenant_data)
-        except ImportError:
-            tenant_message = tenant_data
-
-        result = await client.association_tenants_api.external_api_association_tenants_update_association_tenant(
-            tenant_id=tenant_id, association_tenant_put_message=tenant_message
+        message = c.build_model(
+            "association_tenant_put_message", "AssociationTenantPutMessage", tenant_data
         )
-        if hasattr(result, "to_dict"):
-            return result.to_dict()
-        return result if isinstance(result, dict) else result
+        return await c.execute(
+            "update_association_tenant",
+            lambda: (
+                client.association_tenants_api.external_api_association_tenants_update_association_tenant(
+                    tenant_id=tenant_id, association_tenant_put_message=message
+                )
+            ),
+        )

@@ -5,15 +5,24 @@ from typing import Any
 from fastmcp import FastMCP
 
 from ..buildium_client import BuildiumClient
+from . import _common as c
 
 
 def register_file_tools(mcp: FastMCP, client: BuildiumClient) -> None:
-    """Register file-related tools with the MCP server.
+    """Register file-related tools with the MCP server."""
 
-    Args:
-        mcp: FastMCP server instance.
-        client: Buildium client instance.
-    """
+    c.register_operation("list_files", "ExternalApiFiles_GetFiles")
+    c.register_operation("get_file", "ExternalApiFiles_GetFileById")
+    c.register_operation("update_file", "ExternalApiFiles_UpdateFile")
+    c.register_operation(
+        "create_file_upload_request", "ExternalApiFilesUploads_CreateUploadRequestAsync"
+    )
+    c.register_operation(
+        "create_file_download_request", "ExternalApiFileDownload_GetFileDownloadUrlAsync"
+    )
+    c.register_operation("list_file_categories", "ExternalApiFileCategories_GetFileCategories")
+    c.register_operation("create_file_category", "ExternalApiFileCategories_CreateFileCategory")
+    c.register_operation("update_file_category", "ExternalApiFileCategories_UpdateFileCategory")
 
     @mcp.tool()
     async def list_files(
@@ -23,116 +32,95 @@ def register_file_tools(mcp: FastMCP, client: BuildiumClient) -> None:
         limit: int = 100,
         offset: int = 0,
     ) -> dict[str, Any]:
-        """List files from Buildium."""
-        result = await client.files_api.external_api_files_get_files(
-            entitytype=entity_type,
-            entityid=entity_id,
-            categoryid=category_id,
-            limit=limit,
-            offset=offset,
+        """List files from Buildium, optionally filtered by entity/category."""
+        limit, offset = c.clamp_pagination(limit, offset)
+        kwargs: dict[str, Any] = {"limit": limit, "offset": offset}
+        if entity_type is not None:
+            kwargs["entitytype"] = entity_type
+        if entity_id is not None:
+            kwargs["entityid"] = entity_id
+        if category_id is not None:
+            kwargs["categoryid"] = category_id
+        return await c.execute(
+            "list_files",
+            lambda: client.files_api.external_api_files_get_files(**kwargs),
         )
-        if hasattr(result, "to_dict"):
-            return result.to_dict()
-        return result if isinstance(result, dict) else {"files": result, "count": len(result)}
 
     @mcp.tool()
     async def get_file(file_id: int) -> dict[str, Any]:
         """Get a specific file by ID."""
-        result = await client.files_api.external_api_files_get_file_by_id(file_id=file_id)
-        if hasattr(result, "to_dict"):
-            return result.to_dict()
-        return result if isinstance(result, dict) else result
+        return await c.execute(
+            "get_file",
+            lambda: client.files_api.external_api_files_get_file_by_id(file_id=file_id),
+        )
 
     @mcp.tool()
     async def update_file(file_id: int, file_data: dict[str, Any]) -> dict[str, Any]:
         """Update file metadata."""
-        try:
-            from mcp_server_buildium.buildium_sdk.models.file_put_message import FilePutMessage
-
-            file_message = FilePutMessage(**file_data)
-        except ImportError:
-            file_message = file_data
-
-        result = await client.files_api.external_api_files_update_file(
-            file_id=file_id, file_put_message=file_message
+        message = c.build_model("file_put_message", "FilePutMessage", file_data)
+        return await c.execute(
+            "update_file",
+            lambda: client.files_api.external_api_files_update_file(
+                file_id=file_id, file_put_message=message
+            ),
         )
-        if hasattr(result, "to_dict"):
-            return result.to_dict()
-        return result if isinstance(result, dict) else result
 
     @mcp.tool()
     async def create_file_upload_request(upload_request: dict[str, Any]) -> dict[str, Any]:
-        """Create a file upload request to get an upload URL."""
-        try:
-            from mcp_server_buildium.buildium_sdk.models.file_upload_request_post_message import (
-                FileUploadRequestPostMessage,
-            )
-
-            upload_message = FileUploadRequestPostMessage(**upload_request)
-        except ImportError:
-            upload_message = upload_request
-
-        result = await client.files_api.external_api_file_uploads_create_file_upload_request_async(
-            file_upload_request_post_message=upload_message
+        """Create a file upload request to obtain an upload URL."""
+        message = c.build_model("file_upload_post_message", "FileUploadPostMessage", upload_request)
+        return await c.execute(
+            "create_file_upload_request",
+            lambda: client.files_api.external_api_files_uploads_create_upload_file_request_async(
+                file_upload_post_message=message
+            ),
         )
-        if hasattr(result, "to_dict"):
-            return result.to_dict()
-        return result if isinstance(result, dict) else result
 
     @mcp.tool()
     async def create_file_download_request(file_id: int) -> dict[str, Any]:
-        """Create a file download request to get a download URL."""
-        result = await client.files_api.external_api_file_download_get_file_download_url_async(
-            file_id=file_id
+        """Create a file download request to obtain a download URL."""
+        return await c.execute(
+            "create_file_download_request",
+            lambda: client.files_api.external_api_file_download_get_file_download_url_async(
+                file_id=file_id
+            ),
         )
-        if hasattr(result, "to_dict"):
-            return result.to_dict()
-        return result if isinstance(result, dict) else result
 
     @mcp.tool()
-    async def list_file_categories() -> dict[str, Any]:
+    async def list_file_categories(limit: int = 100, offset: int = 0) -> dict[str, Any]:
         """List file categories from Buildium."""
-        result = await client.files_api.external_api_file_categories_get_file_categories()
-        if hasattr(result, "to_dict"):
-            return result.to_dict()
-        return result if isinstance(result, dict) else {"categories": result, "count": len(result)}
+        limit, offset = c.clamp_pagination(limit, offset)
+        return await c.execute(
+            "list_file_categories",
+            lambda: client.files_api.external_api_file_categories_get_file_categories(
+                limit=limit, offset=offset
+            ),
+        )
 
     @mcp.tool()
     async def create_file_category(category_data: dict[str, Any]) -> dict[str, Any]:
         """Create a new file category."""
-        try:
-            from mcp_server_buildium.buildium_sdk.models.file_category_post_message import (
-                FileCategoryPostMessage,
-            )
-
-            category_message = FileCategoryPostMessage(**category_data)
-        except ImportError:
-            category_message = category_data
-
-        result = await client.files_api.external_api_file_categories_create_file_category(
-            file_category_post_message=category_message
+        message = c.build_model(
+            "file_category_post_message", "FileCategoryPostMessage", category_data
         )
-        if hasattr(result, "to_dict"):
-            return result.to_dict()
-        return result if isinstance(result, dict) else result
+        return await c.execute(
+            "create_file_category",
+            lambda: client.files_api.external_api_file_categories_create_file_category(
+                file_category_post_message=message
+            ),
+        )
 
     @mcp.tool()
     async def update_file_category(
         category_id: int, category_data: dict[str, Any]
     ) -> dict[str, Any]:
-        """Update a file category."""
-        try:
-            from mcp_server_buildium.buildium_sdk.models.file_category_put_message import (
-                FileCategoryPutMessage,
-            )
-
-            category_message = FileCategoryPutMessage(**category_data)
-        except ImportError:
-            category_message = category_data
-
-        result = await client.files_api.external_api_file_categories_update_file_category(
-            file_category_id=category_id, file_category_put_message=category_message
+        """Update an existing file category."""
+        message = c.build_model(
+            "file_category_put_message", "FileCategoryPutMessage", category_data
         )
-        if hasattr(result, "to_dict"):
-            return result.to_dict()
-        return result if isinstance(result, dict) else result
+        return await c.execute(
+            "update_file_category",
+            lambda: client.files_api.external_api_file_categories_update_file_category(
+                file_category_id=category_id, file_category_put_message=message
+            ),
+        )
