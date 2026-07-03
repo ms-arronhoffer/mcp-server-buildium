@@ -152,7 +152,9 @@ def register_chat_routes(
 
         # Resolve the caller's effective policy (server ceiling ∩ Entra App Role).
         effective = (
-            effective_policy_for_claims(base_policy, role_map, claims) if scoping_active else None
+            effective_policy_for_claims(base_policy, role_map, claims)
+            if scoping_active
+            else None
         )
 
         def _permitted(name: str) -> bool:

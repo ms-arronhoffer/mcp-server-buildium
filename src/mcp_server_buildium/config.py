@@ -448,7 +448,9 @@ class BuildiumConfig(BaseSettings):
                 "App Role/group values to a coarse role"
             ) from exc
         if not isinstance(parsed, dict) or not parsed:
-            raise ValueError("BUILDIUM_ENTRA_ROLE_POLICY_MAP must be a non-empty JSON object")
+            raise ValueError(
+                "BUILDIUM_ENTRA_ROLE_POLICY_MAP must be a non-empty JSON object"
+            )
         for key, value in parsed.items():
             if not isinstance(key, str) or not key.strip():
                 raise ValueError("BUILDIUM_ENTRA_ROLE_POLICY_MAP keys must be non-empty strings")
