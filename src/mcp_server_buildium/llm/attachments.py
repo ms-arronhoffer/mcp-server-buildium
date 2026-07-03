@@ -202,7 +202,7 @@ def _extract_pdf_text(data: bytes) -> str | None:
     document could not be read as text (native multimodal providers still receive
     the raw PDF).
     """
-    try:  # pragma: no cover - optional dependency, exercised only when present
+    try:  # pragma: no cover - optional dependency, not tested
         from pypdf import PdfReader  # type: ignore
     except ImportError:
         return None
