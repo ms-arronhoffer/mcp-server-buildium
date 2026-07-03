@@ -83,3 +83,9 @@ button {
   font-size: 13px;
   margin-top: 8px;
 }
+
+/* Fields prepopulated by a build-time baked default (still user-editable). */
+input.prefilled {
+  background: #f1f8ff;
+  border-color: #a9c9f5;
+}

@@ -9,6 +9,7 @@
  */
 
 import { getApi } from "./browser.js";
+import { BAKED_CONFIG } from "./config.baked.js";
 
 /** @typedef {Object} ExtensionConfig
  * @property {string} mcpServerUrl   Base URL of the MCP Streamable HTTP endpoint (e.g. https://host/mcp)
@@ -28,6 +29,24 @@ export const DEFAULT_CONFIG = {
 };
 
 const STORAGE_KEY = "buildium_mcp_config";
+
+/**
+ * Keep only recognised, non-empty string fields from a partial config object.
+ * Used to sanitise build-time baked defaults before they are layered in. Pure.
+ * @param {Partial<ExtensionConfig>} [source]
+ * @returns {Partial<ExtensionConfig>}
+ */
+export function pickKnownFields(source) {
+  const out = {};
+  if (!source || typeof source !== "object") return out;
+  for (const key of Object.keys(DEFAULT_CONFIG)) {
+    const value = source[key];
+    if (typeof value === "string" && value.trim() !== "") {
+      out[key] = value;
+    }
+  }
+  return out;
+}
 
 /**
  * Derive a sibling endpoint URL (e.g. the `/chat` or `/capabilities` route) from
@@ -68,12 +87,26 @@ export function validateConfig(cfg) {
 }
 
 /**
- * Merge stored values over defaults. Pure function.
+ * Merge stored values over the build-time baked defaults over the built-in
+ * defaults. User-saved settings win, so baked values act as overridable
+ * defaults. Pure function.
+ *
+ *   DEFAULT_CONFIG  <  BAKED_CONFIG  <  stored (user)
+ *
  * @param {Partial<ExtensionConfig>} stored
  * @returns {ExtensionConfig}
  */
 export function withDefaults(stored) {
-  return { ...DEFAULT_CONFIG, ...(stored || {}) };
+  return { ...DEFAULT_CONFIG, ...pickKnownFields(BAKED_CONFIG), ...(stored || {}) };
+}
+
+/**
+ * Return the set of field names supplied by the build-time baked defaults.
+ * The options page can use this to show that a field is prepopulated. Pure.
+ * @returns {string[]}
+ */
+export function bakedFields() {
+  return Object.keys(pickKnownFields(BAKED_CONFIG));
 }
 
 /** Load configuration from storage.local, merged over defaults. */

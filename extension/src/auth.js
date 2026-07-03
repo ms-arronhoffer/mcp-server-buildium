@@ -208,12 +208,16 @@ export async function signIn(config) {
 /**
  * Return a valid access token, refreshing or prompting for sign-in as needed.
  * @param {import('./config.js').ExtensionConfig} config
- * @param {{interactive?:boolean}} [opts]
+ * @param {{interactive?:boolean, forceRefresh?:boolean}} [opts]
+ *   `forceRefresh` bypasses the cached access token and mints a new one (via the
+ *   refresh token, else interactive sign-in). Use it to recover from a token the
+ *   server rejects — e.g. after a key rotation or server restart — without
+ *   forcing the user to sign in again.
  * @returns {Promise<string>}
  */
 export async function getAccessToken(config, opts = {}) {
   const tokens = await readStoredTokens();
-  if (tokens && tokens.expiresAt > Date.now()) {
+  if (!opts.forceRefresh && tokens && tokens.expiresAt > Date.now()) {
     return tokens.accessToken;
   }
   if (tokens && tokens.refreshToken) {

@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_CONFIG, deriveEndpoint, validateConfig, withDefaults } from "../src/config.js";
+import {
+  DEFAULT_CONFIG,
+  deriveEndpoint,
+  pickKnownFields,
+  validateConfig,
+  withDefaults,
+} from "../src/config.js";
 
 describe("config", () => {
   it("withDefaults fills missing fields", () => {
@@ -51,5 +57,23 @@ describe("config", () => {
       entraScopes: "s",
     });
     expect(errors.join(" ")).toMatch(/http:\/\/ or https:\/\//);
+  });
+
+  it("pickKnownFields keeps only recognised, non-empty string fields", () => {
+    const picked = pickKnownFields({
+      mcpServerUrl: "https://baked/mcp",
+      entraScopes: "",
+      unknownKey: "ignored",
+      entraTenantId: "baked-tid",
+    });
+    expect(picked).toEqual({ mcpServerUrl: "https://baked/mcp", entraTenantId: "baked-tid" });
+  });
+
+  it("lets user-stored settings override baked defaults, which override built-ins", () => {
+    // With no baked config checked in, user values still win over DEFAULT_CONFIG.
+    const cfg = withDefaults({ mcpServerUrl: "https://user/mcp" });
+    expect(cfg.mcpServerUrl).toBe("https://user/mcp");
+    // Unset fields fall back to the built-in defaults.
+    expect(cfg.entraTenantId).toBe(DEFAULT_CONFIG.entraTenantId);
   });
 });

@@ -121,4 +121,37 @@ describe("ChatClient", () => {
     await expect(chat.run([{ role: "user", content: "x" }])).rejects.toMatchObject({ code: 401 });
     vi.unstubAllGlobals();
   });
+
+  it("force-refreshes the token and retries once on a 401", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(streamResponse("", { ok: false, status: 401 }))
+      .mockResolvedValueOnce(streamResponse('data: {"type":"done","content":"ok"}\n'));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const tokenOpts = [];
+    const getToken = vi.fn(async (opts) => {
+      tokenOpts.push(opts);
+      return opts && opts.forceRefresh ? "fresh" : "stale";
+    });
+    const chat = new ChatClient(config, getToken);
+    const { content } = await chat.run([{ role: "user", content: "x" }]);
+
+    expect(content).toBe("ok");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // First attempt uses the cached token; the retry forces a refresh.
+    expect(tokenOpts[0]).toEqual({});
+    expect(tokenOpts[1]).toEqual({ forceRefresh: true });
+    vi.unstubAllGlobals();
+  });
+
+  it("throws a 401 when even a refreshed token is rejected", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => streamResponse("", { ok: false, status: 401 })));
+    const getToken = vi.fn(async () => "t");
+    const chat = new ChatClient(config, getToken);
+    await expect(chat.run([{ role: "user", content: "x" }])).rejects.toMatchObject({ code: 401 });
+    // One initial attempt plus one forced-refresh retry.
+    expect(getToken).toHaveBeenCalledTimes(2);
+    vi.unstubAllGlobals();
+  });
 });

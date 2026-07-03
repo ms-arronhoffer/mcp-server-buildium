@@ -1,0 +1,8 @@
+{
+  "__comment": "Copy to config.defaults.json to bake preconfigured (but user-overridable) defaults into your build. Only public identifiers/URLs — never secrets. Environment variables of the same name (MCP_SERVER_URL, ENTRA_TENANT_ID, ENTRA_CLIENT_ID, ENTRA_SCOPES, LLM_MODEL) override these values at build time.",
+  "MCP_SERVER_URL": "https://your-host.example.com/mcp",
+  "ENTRA_TENANT_ID": "00000000-0000-0000-0000-000000000000",
+  "ENTRA_CLIENT_ID": "11111111-1111-1111-1111-111111111111",
+  "ENTRA_SCOPES": "api://<api-app-id>/MCP.Access",
+  "LLM_MODEL": ""
+}
