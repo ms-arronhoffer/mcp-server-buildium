@@ -327,9 +327,7 @@ class BuildiumConfig(BaseSettings):
             )
         allowed = self.get_llm_allowed_models()
         if allowed is not None and self.llm_model.strip() not in allowed:
-            raise ValueError(
-                "BUILDIUM_LLM_MODEL must be a member of BUILDIUM_LLM_ALLOWED_MODELS"
-            )
+            raise ValueError("BUILDIUM_LLM_MODEL must be a member of BUILDIUM_LLM_ALLOWED_MODELS")
         if self.llm_max_tool_rounds < 1:
             raise ValueError("BUILDIUM_LLM_MAX_TOOL_ROUNDS must be >= 1")
 

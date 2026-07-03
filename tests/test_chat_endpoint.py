@@ -15,6 +15,10 @@ import pytest
 
 os.environ.setdefault("BUILDIUM_CLIENT_ID", "test-client-id")
 os.environ.setdefault("BUILDIUM_CLIENT_SECRET", "test-client-secret")
+# Keep the CORS origin consistent with test_http_transport: the server module
+# builds its configuration once at import time, and whichever test module imports
+# it first wins, so both must agree on the configured origin.
+os.environ.setdefault("BUILDIUM_CORS_ALLOW_ORIGINS", "chrome-extension://testext")
 # Enable the assistant with a two-model allow-list. The key must never leak.
 os.environ["BUILDIUM_LLM_PROVIDER"] = "openai"
 os.environ["BUILDIUM_LLM_MODEL"] = "gpt-4o-mini"
@@ -26,6 +30,18 @@ from mcp_server_buildium import (
     server,  # noqa: E402
 )
 from mcp_server_buildium.llm.base import Completion, ToolCall  # noqa: E402
+
+# The server module captured this configuration at import time, so the process
+# environment no longer needs the LLM variables. Remove them now to avoid
+# leaking assistant configuration into other test modules that build their own
+# BuildiumConfig from the environment.
+for _leaked in (
+    "BUILDIUM_LLM_PROVIDER",
+    "BUILDIUM_LLM_MODEL",
+    "BUILDIUM_LLM_ALLOWED_MODELS",
+    "BUILDIUM_LLM_OPENAI_API_KEY",
+):
+    os.environ.pop(_leaked, None)
 
 
 @pytest.fixture()

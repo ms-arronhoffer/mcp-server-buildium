@@ -11,8 +11,7 @@
 import { getApi } from "./browser.js";
 import { getAccessToken, isSignedIn, signIn, signOut } from "./auth.js";
 import { loadConfig, validateConfig } from "./config.js";
-import { McpClient } from "./mcpClient.js";
-import { Agent } from "./llm.js";
+import { ChatClient } from "./llm.js";
 
 const api = getApi();
 
@@ -29,8 +28,7 @@ const els = {
 
 /** @type {import('./config.js').ExtensionConfig|null} */
 let config = null;
-let mcp = null;
-let agent = null;
+let chat = null;
 let busy = false;
 /** Chat history in OpenAI message format (user/assistant only). */
 const history = [];
@@ -104,8 +102,7 @@ async function ensureReady() {
     return false;
   }
   hideBanner();
-  mcp = new McpClient(config.mcpServerUrl, () => getAccessToken(config));
-  agent = new Agent(config, mcp);
+  chat = new ChatClient(config, () => getAccessToken(config));
   await refreshSignInState();
   return true;
 }
@@ -123,7 +120,7 @@ async function handleSend(text) {
   let streamed = "";
 
   try {
-    const { content } = await agent.run(history, {
+    const { content } = await chat.run(history, {
       onToken: (t) => {
         streamed += t;
         assistantEl.textContent = streamed;
