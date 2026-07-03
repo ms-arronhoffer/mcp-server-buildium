@@ -87,3 +87,61 @@ def test_clamp_pagination_bounds() -> None:
     assert c.clamp_pagination(100000, -5) == (c.MAX_LIMIT, 0)
     assert c.clamp_pagination(0, 10) == (c.MIN_LIMIT, 10)
     assert c.clamp_pagination(None, None) == (c.DEFAULT_LIMIT, 0)
+
+
+# ---------------------------------------------------------------------------
+# create() helper: friendly validation errors that prompt for missing info
+# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_create_missing_required_fields_returns_friendly_prompt() -> None:
+    called = False
+
+    async def _call(_message):  # pragma: no cover - must not be reached
+        nonlocal called
+        called = True
+        return {"ok": True}
+
+    env = await c.create(
+        "create_rental",
+        "rental_property_post_message",
+        "RentalPropertyPostMessage",
+        {"Name": "Test"},  # missing Address, RentalSubType, OperatingBankAccountId
+        _call,
+    )
+
+    assert not called  # the SDK create request is never attempted
+    assert env["data"] is None
+    assert env["error"]["code"] == "validation_error"
+    msg = env["error"]["message"]
+    assert "create rental" in msg
+    assert "Address" in msg and "OperatingBankAccountId" in msg
+    assert "provide" in msg.lower()
+
+
+@pytest.mark.asyncio
+async def test_create_valid_data_invokes_call() -> None:
+    seen = {}
+
+    async def _call(message):
+        seen["message"] = message
+        return {"Id": 7}
+
+    env = await c.create(
+        "create_rental",
+        "rental_property_post_message",
+        "RentalPropertyPostMessage",
+        {
+            "Name": "Test",
+            "RentalSubType": "SingleFamily",
+            "OperatingBankAccountId": 1,
+            "Address": {
+                "AddressLine1": "1 Main St",
+                "PostalCode": "90210",
+                "Country": "UnitedStates",
+            },
+        },
+        _call,
+    )
+
+    assert env["error"] is None
+    assert "message" in seen

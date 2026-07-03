@@ -9,6 +9,7 @@ bearer token), unless ``BUILDIUM_DEV_AUTH_BYPASS`` is enabled.
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from starlette.requests import Request
@@ -80,6 +81,29 @@ def _sse(event: dict[str, Any]) -> str:
     return f"data: {json.dumps(event)}\n\n"
 
 
+# Event types that are internal to the tool-calling loop. They drive the loop
+# server-side but must never be forwarded to the chat UI, so users never see raw
+# tool calls or their results in the conversation.
+_INTERNAL_EVENT_TYPES = frozenset({"tool_call", "tool_result"})
+
+
+def _current_datetime_note(now: datetime | None = None) -> str:
+    """Return a system-prompt line stating the current UTC date and time.
+
+    Injected on every request so the assistant always anchors relative or
+    date-offset calculations (e.g. "in 30 days", "leases expiring next month")
+    to the real current time instead of its training-time assumptions.
+    """
+    current = (now or datetime.now(UTC)).astimezone(UTC)
+    stamp = current.strftime("%Y-%m-%dT%H:%M:%SZ")
+    return (
+        f"The current date and time is {stamp} (UTC), {current.strftime('%A, %d %B %Y')}. "
+        "Always use this as 'now' when computing any date-related offsets or "
+        "relative dates (for example 'today', 'in 30 days', 'last month', "
+        "'expiring soon'); never rely on your own assumption of the current date."
+    )
+
+
 def register_chat_routes(
     mcp: Any,
     config: BuildiumConfig,
@@ -140,9 +164,12 @@ def register_chat_routes(
             )
 
         # Build the conversation: server-controlled system prompt + client history.
-        messages: list[dict[str, Any]] = [
-            {"role": "system", "content": config.get_llm_system_prompt()}
-        ]
+        # A dynamic date/time note is appended so the assistant always anchors
+        # relative date calculations to the real current time.
+        system_content = (
+            config.get_llm_system_prompt() + "\n\n" + _current_datetime_note()
+        )
+        messages: list[dict[str, Any]] = [{"role": "system", "content": system_content}]
         for m in history:
             if not isinstance(m, dict):
                 continue
@@ -194,6 +221,10 @@ def register_chat_routes(
                     messages,
                     max_rounds=config.llm_max_tool_rounds,
                 ):
+                    # Internal tool-call/result events drive the loop but are
+                    # never surfaced to the user in the chat.
+                    if event.get("type") in _INTERNAL_EVENT_TYPES:
+                        continue
                     yield _sse(event)
             except Exception as exc:  # pragma: no cover - defensive
                 logger.exception("chat stream failed")

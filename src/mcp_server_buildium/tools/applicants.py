@@ -66,10 +66,12 @@ def register_applicant_tools(mcp: FastMCP, client: BuildiumClient) -> None:
     @mcp.tool()
     async def create_applicant(applicant_data: dict[str, Any]) -> dict[str, Any]:
         """Create a new applicant."""
-        message = c.build_model("applicant_post_message", "ApplicantPostMessage", applicant_data)
-        return await c.execute(
+        return await c.create(
             "create_applicant",
-            lambda: client.applicants_api.external_api_applicants_create_applicant(
+            "applicant_post_message",
+            "ApplicantPostMessage",
+            applicant_data,
+            lambda message: client.applicants_api.external_api_applicants_create_applicant(
                 applicant_post_message=message
             ),
         )
@@ -164,12 +166,12 @@ def register_applicant_tools(mcp: FastMCP, client: BuildiumClient) -> None:
     @mcp.tool()
     async def create_applicant_group(group_data: dict[str, Any]) -> dict[str, Any]:
         """Create a new applicant group."""
-        message = c.build_model(
-            "applicant_group_post_message", "ApplicantGroupPostMessage", group_data
-        )
-        return await c.execute(
+        return await c.create(
             "create_applicant_group",
-            lambda: client.applicants_api.external_api_applicant_groups_create_applicant_group(
+            "applicant_group_post_message",
+            "ApplicantGroupPostMessage",
+            group_data,
+            lambda message: client.applicants_api.external_api_applicant_groups_create_applicant_group(
                 applicant_group_post_message=message
             ),
         )

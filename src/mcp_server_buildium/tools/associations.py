@@ -8,17 +8,10 @@ from ..buildium_client import BuildiumClient
 from . import _common as c
 
 try:
-    from mcp_server_buildium.buildium_sdk.models.association_post_message import (
-        AssociationPostMessage,
-    )
     from mcp_server_buildium.buildium_sdk.models.association_put_message import (
         AssociationPutMessage,
     )
 except ImportError:  # pragma: no cover
-
-    class AssociationPostMessage:  # type: ignore[no-redef]
-        def __init__(self, **kwargs):
-            self.__dict__.update(kwargs)
 
     class AssociationPutMessage:  # type: ignore[no-redef]
         def __init__(self, **kwargs):
@@ -73,10 +66,12 @@ def register_association_tools(mcp: FastMCP, client: BuildiumClient) -> None:
     @mcp.tool()
     async def create_association(association_data: dict[str, Any]) -> dict[str, Any]:
         """Create a new association."""
-        message = AssociationPostMessage(**association_data)
-        return await c.execute(
+        return await c.create(
             "create_association",
-            lambda: client.associations_api.external_api_associations_create_association(
+            "association_post_message",
+            "AssociationPostMessage",
+            association_data,
+            lambda message: client.associations_api.external_api_associations_create_association(
                 association_post_message=message
             ),
         )

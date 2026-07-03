@@ -56,10 +56,12 @@ def register_owner_tools(mcp: FastMCP, client: BuildiumClient) -> None:
     @mcp.tool()
     async def create_rental_owner(owner_data: dict[str, Any]) -> dict[str, Any]:
         """Create a new rental owner."""
-        message = c.build_model("rental_owner_post_message", "RentalOwnerPostMessage", owner_data)
-        return await c.execute(
+        return await c.create(
             "create_rental_owner",
-            lambda: client.rental_owners_api.external_api_rental_owners_create_rental_owner(
+            "rental_owner_post_message",
+            "RentalOwnerPostMessage",
+            owner_data,
+            lambda message: client.rental_owners_api.external_api_rental_owners_create_rental_owner(
                 rental_owner_post_message=message
             ),
         )
@@ -122,14 +124,12 @@ def register_owner_tools(mcp: FastMCP, client: BuildiumClient) -> None:
     @mcp.tool()
     async def create_association_owner(owner_data: dict[str, Any]) -> dict[str, Any]:
         """Create a new association owner on an existing ownership account."""
-        message = c.build_model(
+        return await c.create(
+            "create_association_owner",
             "association_owner_to_existing_ownership_account_post_message",
             "AssociationOwnerToExistingOwnershipAccountPostMessage",
             owner_data,
-        )
-        return await c.execute(
-            "create_association_owner",
-            lambda: (
+            lambda message: (
                 client.association_owners_api.external_api_association_owners_create_association_owner(
                     association_owner_to_existing_ownership_account_post_message=message
                 )

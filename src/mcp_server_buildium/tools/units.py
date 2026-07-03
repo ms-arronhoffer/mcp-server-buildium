@@ -55,10 +55,12 @@ def register_unit_tools(mcp: FastMCP, client: BuildiumClient) -> None:
     @mcp.tool()
     async def create_rental_unit(unit_data: dict[str, Any]) -> dict[str, Any]:
         """Create a new rental unit."""
-        message = c.build_model("rental_unit_post_message", "RentalUnitPostMessage", unit_data)
-        return await c.execute(
+        return await c.create(
             "create_rental_unit",
-            lambda: client.rental_units_api.external_api_rental_units_create_rental_unit(
+            "rental_unit_post_message",
+            "RentalUnitPostMessage",
+            unit_data,
+            lambda message: client.rental_units_api.external_api_rental_units_create_rental_unit(
                 rental_unit_post_message=message
             ),
         )
@@ -105,12 +107,12 @@ def register_unit_tools(mcp: FastMCP, client: BuildiumClient) -> None:
     @mcp.tool()
     async def create_association_unit(unit_data: dict[str, Any]) -> dict[str, Any]:
         """Create a new association unit."""
-        message = c.build_model(
-            "association_unit_post_message", "AssociationUnitPostMessage", unit_data
-        )
-        return await c.execute(
+        return await c.create(
             "create_association_unit",
-            lambda: (
+            "association_unit_post_message",
+            "AssociationUnitPostMessage",
+            unit_data,
+            lambda message: (
                 client.association_units_api.external_api_association_units_create_association_unit(
                     association_unit_post_message=message
                 )

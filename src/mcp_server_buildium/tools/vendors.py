@@ -56,10 +56,12 @@ def register_vendor_tools(mcp: FastMCP, client: BuildiumClient) -> None:
     @mcp.tool()
     async def create_vendor(vendor_data: dict[str, Any]) -> dict[str, Any]:
         """Create a new vendor."""
-        message = c.build_model("vendor_post_message", "VendorPostMessage", vendor_data)
-        return await c.execute(
+        return await c.create(
             "create_vendor",
-            lambda: client.vendors_api.external_api_vendors_create_vendor(
+            "vendor_post_message",
+            "VendorPostMessage",
+            vendor_data,
+            lambda message: client.vendors_api.external_api_vendors_create_vendor(
                 vendor_post_message=message
             ),
         )
@@ -100,12 +102,12 @@ def register_vendor_tools(mcp: FastMCP, client: BuildiumClient) -> None:
     @mcp.tool()
     async def create_vendor_category(category_data: dict[str, Any]) -> dict[str, Any]:
         """Create a new vendor category."""
-        message = c.build_model(
-            "vendor_category_save_message", "VendorCategorySaveMessage", category_data
-        )
-        return await c.execute(
+        return await c.create(
             "create_vendor_category",
-            lambda: client.vendors_api.external_api_vendor_categories_create_vendor_category(
+            "vendor_category_save_message",
+            "VendorCategorySaveMessage",
+            category_data,
+            lambda message: client.vendors_api.external_api_vendor_categories_create_vendor_category(
                 vendor_category_save_message=message
             ),
         )

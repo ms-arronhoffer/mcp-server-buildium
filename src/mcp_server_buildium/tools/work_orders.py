@@ -61,10 +61,12 @@ def register_work_order_tools(mcp: FastMCP, client: BuildiumClient) -> None:
     @mcp.tool()
     async def create_work_order(work_order_data: dict[str, Any]) -> dict[str, Any]:
         """Create a new work order."""
-        message = c.build_model("work_order_post_message", "WorkOrderPostMessage", work_order_data)
-        return await c.execute(
+        return await c.create(
             "create_work_order",
-            lambda: client.work_orders_api.external_api_work_orders_create_work_order(
+            "work_order_post_message",
+            "WorkOrderPostMessage",
+            work_order_data,
+            lambda message: client.work_orders_api.external_api_work_orders_create_work_order(
                 work_order_post_message=message
             ),
         )

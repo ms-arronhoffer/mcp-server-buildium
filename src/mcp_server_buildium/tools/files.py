@@ -77,10 +77,12 @@ def register_file_tools(mcp: FastMCP, client: BuildiumClient) -> None:
     @mcp.tool()
     async def create_file_upload_request(upload_request: dict[str, Any]) -> dict[str, Any]:
         """Create a file upload request to obtain an upload URL."""
-        message = c.build_model("file_upload_post_message", "FileUploadPostMessage", upload_request)
-        return await c.execute(
+        return await c.create(
             "create_file_upload_request",
-            lambda: client.files_api.external_api_files_uploads_create_upload_file_request_async(
+            "file_upload_post_message",
+            "FileUploadPostMessage",
+            upload_request,
+            lambda message: client.files_api.external_api_files_uploads_create_upload_file_request_async(
                 file_upload_post_message=message
             ),
         )
@@ -109,12 +111,12 @@ def register_file_tools(mcp: FastMCP, client: BuildiumClient) -> None:
     @mcp.tool()
     async def create_file_category(category_data: dict[str, Any]) -> dict[str, Any]:
         """Create a new file category."""
-        message = c.build_model(
-            "file_category_post_message", "FileCategoryPostMessage", category_data
-        )
-        return await c.execute(
+        return await c.create(
             "create_file_category",
-            lambda: client.files_api.external_api_file_categories_create_file_category(
+            "file_category_post_message",
+            "FileCategoryPostMessage",
+            category_data,
+            lambda message: client.files_api.external_api_file_categories_create_file_category(
                 file_category_post_message=message
             ),
         )
