@@ -1,0 +1,151 @@
+"""Integration tests for the /chat and /capabilities HTTP routes.
+
+Boots the FastMCP ASGI app in-process (Starlette ``TestClient``) with the
+server-side assistant enabled, stubs the provider so no network is used, and
+verifies streaming events, model allow-list enforcement, auth, and that no key
+material is ever exposed.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+
+import pytest
+
+os.environ.setdefault("BUILDIUM_CLIENT_ID", "test-client-id")
+os.environ.setdefault("BUILDIUM_CLIENT_SECRET", "test-client-secret")
+# Enable the assistant with a two-model allow-list. The key must never leak.
+os.environ["BUILDIUM_LLM_PROVIDER"] = "openai"
+os.environ["BUILDIUM_LLM_MODEL"] = "gpt-4o-mini"
+os.environ["BUILDIUM_LLM_ALLOWED_MODELS"] = "gpt-4o-mini,gpt-4o"
+os.environ["BUILDIUM_LLM_OPENAI_API_KEY"] = "sk-super-secret-value"
+
+from mcp_server_buildium import (
+    chat_endpoint,  # noqa: E402
+    server,  # noqa: E402
+)
+from mcp_server_buildium.llm.base import Completion, ToolCall  # noqa: E402
+
+
+@pytest.fixture()
+def client():
+    from starlette.testclient import TestClient
+
+    app = server.mcp.http_app(path="/mcp", middleware=server._build_cors_middleware())
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+def _sse_events(text: str) -> list[dict]:
+    events = []
+    for line in text.splitlines():
+        if line.startswith("data:"):
+            events.append(json.loads(line[len("data:") :].strip()))
+    return events
+
+
+def test_capabilities_lists_models_without_keys(client) -> None:
+    resp = client.get("/capabilities")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["enabled"] is True
+    assert data["provider"] == "openai"
+    assert data["default_model"] == "gpt-4o-mini"
+    assert data["models"] == ["gpt-4o-mini", "gpt-4o"]
+    # The API key must never appear anywhere in the response body.
+    assert "sk-super-secret-value" not in resp.text
+
+
+def test_chat_rejects_disallowed_model(client) -> None:
+    resp = client.post(
+        "/chat", json={"messages": [{"role": "user", "content": "hi"}], "model": "gpt-5"}
+    )
+    assert resp.status_code == 400
+
+
+def test_chat_streams_direct_answer(client, monkeypatch) -> None:
+    class StubProvider:
+        def __init__(self, *a, **k) -> None:
+            pass
+
+        async def complete(self, messages, tools):
+            return Completion(content="Hello from the server.")
+
+    monkeypatch.setattr(chat_endpoint, "build_provider", lambda *a, **k: StubProvider())
+
+    resp = client.post("/chat", json={"messages": [{"role": "user", "content": "hi"}]})
+    assert resp.status_code == 200
+    events = _sse_events(resp.text)
+    assert {"type": "token", "text": "Hello from the server."} in events
+    assert events[-1]["type"] == "done"
+
+
+def test_chat_executes_inprocess_tool(client, monkeypatch) -> None:
+    # First turn asks to call the built-in health_check tool; second turn answers.
+    completions = [
+        Completion(content="", tool_calls=[ToolCall("c1", "health_check", {})]),
+        Completion(content="All good."),
+    ]
+
+    class StubProvider:
+        def __init__(self, *a, **k) -> None:
+            pass
+
+        async def complete(self, messages, tools):
+            return completions.pop(0)
+
+    monkeypatch.setattr(chat_endpoint, "build_provider", lambda *a, **k: StubProvider())
+
+    resp = client.post("/chat", json={"messages": [{"role": "user", "content": "status?"}]})
+    assert resp.status_code == 200
+    events = _sse_events(resp.text)
+    tool_results = [e for e in events if e["type"] == "tool_result"]
+    assert tool_results and tool_results[0]["name"] == "health_check"
+    # The real tool executed in-process and returned the health envelope.
+    assert '"status": "ok"' in tool_results[0]["text"] or '"status":"ok"' in tool_results[0]["text"]
+    assert events[-1] == {"type": "done", "content": "All good."}
+
+
+def test_chat_auth_required_when_verifier_configured() -> None:
+    """The auth helper enforces bearer tokens unless bypassed/unconfigured."""
+    import asyncio
+
+    from starlette.requests import Request
+
+    from mcp_server_buildium.chat_endpoint import _authorized
+
+    class Cfg:
+        dev_auth_bypass = False
+
+    class Verifier:
+        async def verify_token(self, token):
+            return {"sub": "u"} if token == "good" else None
+
+    def make_request(headers: dict[str, str]) -> Request:
+        raw = [(k.lower().encode(), v.encode()) for k, v in headers.items()]
+        return Request({"type": "http", "headers": raw})
+
+    async def run():
+        cfg = Cfg()
+        verifier = Verifier()
+        scheme = "Bearer "
+        # No Authorization header -> rejected.
+        assert await _authorized(make_request({}), cfg, verifier) is False
+        # Wrong token -> rejected.
+        assert (
+            await _authorized(make_request({"Authorization": scheme + "bad"}), cfg, verifier)
+            is False
+        )
+        # Valid token -> allowed.
+        assert (
+            await _authorized(make_request({"Authorization": scheme + "good"}), cfg, verifier)
+            is True
+        )
+        # No verifier configured -> open (e.g. stdio/dev).
+        assert await _authorized(make_request({}), cfg, None) is True
+        # Dev bypass overrides everything.
+        cfg.dev_auth_bypass = True
+        assert await _authorized(make_request({}), cfg, verifier) is True
+
+    asyncio.run(run())
