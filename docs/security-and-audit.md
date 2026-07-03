@@ -92,6 +92,6 @@ and an optional actionable `hint`.
 
 ## Tuning
 
-Retry, timeout, and pagination limits are configurable via environment
-variables: `BUILDIUM_MAX_RETRIES`, `BUILDIUM_REQUEST_TIMEOUT_SECONDS`,
+Retry and pagination limits are configurable via environment
+variables: `BUILDIUM_MAX_RETRIES`,
 `BUILDIUM_MAX_PAGE_LIMIT`, and `BUILDIUM_DEFAULT_PAGE_LIMIT`.
