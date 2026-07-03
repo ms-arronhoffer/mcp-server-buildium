@@ -66,14 +66,27 @@ def register_owner_tools(mcp: FastMCP, client: BuildiumClient) -> None:
 
     @mcp.tool()
     async def update_rental_owner(owner_id: int, owner_data: dict[str, Any]) -> dict[str, Any]:
-        """Update an existing rental owner."""
-        message = c.build_model("rental_owner_put_message", "RentalOwnerPutMessage", owner_data)
-        return await c.execute(
-            "update_rental_owner",
-            lambda: client.rental_owners_api.external_api_rental_owners_update_rental_owner(
+        """Update an existing rental owner, merging changes onto the current record.
+
+        ``owner_data`` only needs the fields you want to change; the current
+        owner is fetched first to supply required fields so partial edits succeed
+        without a full schema. Keys may use JSON aliases or field names, and
+        phone numbers use the keyed object form, e.g.
+        ``{"phone_numbers": {"mobile": "555-555-5555"}}``.
+        """
+
+        async def _do_update() -> Any:
+            api = client.rental_owners_api
+            current = await api.external_api_rental_owners_get_rental_owner_by_id(
+                rental_owner_id=owner_id
+            )
+            merged = c.merge_update(current, owner_data, reshape_phones=True)
+            message = c.build_model("rental_owner_put_message", "RentalOwnerPutMessage", merged)
+            return await api.external_api_rental_owners_update_rental_owner(
                 rental_owner_id=owner_id, rental_owner_put_message=message
-            ),
-        )
+            )
+
+        return await c.execute("update_rental_owner", _do_update)
 
     # Association Owners
     @mcp.tool()
@@ -125,15 +138,26 @@ def register_owner_tools(mcp: FastMCP, client: BuildiumClient) -> None:
 
     @mcp.tool()
     async def update_association_owner(owner_id: int, owner_data: dict[str, Any]) -> dict[str, Any]:
-        """Update an existing association owner."""
-        message = c.build_model(
-            "association_owner_put_message", "AssociationOwnerPutMessage", owner_data
-        )
-        return await c.execute(
-            "update_association_owner",
-            lambda: (
-                client.association_owners_api.external_api_association_owners_update_association_owner(
-                    owner_id=owner_id, association_owner_put_message=message
-                )
-            ),
-        )
+        """Update an existing association owner, merging changes onto the current record.
+
+        ``owner_data`` only needs the fields you want to change; the current
+        owner is fetched first to supply required fields so partial edits succeed
+        without a full schema. Keys may use JSON aliases or field names, and
+        phone numbers use the keyed object form, e.g.
+        ``{"phone_numbers": {"mobile": "555-555-5555"}}``.
+        """
+
+        async def _do_update() -> Any:
+            api = client.association_owners_api
+            current = await api.external_api_association_owners_get_association_owner_by_id(
+                owner_id=owner_id
+            )
+            merged = c.merge_update(current, owner_data, reshape_phones=True)
+            message = c.build_model(
+                "association_owner_put_message", "AssociationOwnerPutMessage", merged
+            )
+            return await api.external_api_association_owners_update_association_owner(
+                owner_id=owner_id, association_owner_put_message=message
+            )
+
+        return await c.execute("update_association_owner", _do_update)

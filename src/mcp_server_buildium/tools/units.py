@@ -65,14 +65,23 @@ def register_unit_tools(mcp: FastMCP, client: BuildiumClient) -> None:
 
     @mcp.tool()
     async def update_rental_unit(unit_id: int, unit_data: dict[str, Any]) -> dict[str, Any]:
-        """Update an existing rental unit."""
-        message = c.build_model("rental_unit_put_message", "RentalUnitPutMessage", unit_data)
-        return await c.execute(
-            "update_rental_unit",
-            lambda: client.rental_units_api.external_api_rental_units_update_rental_unit(
+        """Update an existing rental unit, merging changes onto the current record.
+
+        ``unit_data`` only needs the fields you want to change; the current unit
+        is fetched first to supply required fields so partial edits succeed
+        without a full schema.
+        """
+
+        async def _do_update() -> Any:
+            api = client.rental_units_api
+            current = await api.external_api_rental_units_get_rental_unit_by_id(unit_id=unit_id)
+            merged = c.merge_update(current, unit_data)
+            message = c.build_model("rental_unit_put_message", "RentalUnitPutMessage", merged)
+            return await api.external_api_rental_units_update_rental_unit(
                 unit_id=unit_id, rental_unit_put_message=message
-            ),
-        )
+            )
+
+        return await c.execute("update_rental_unit", _do_update)
 
     # Association Units
     @mcp.tool()
@@ -110,15 +119,24 @@ def register_unit_tools(mcp: FastMCP, client: BuildiumClient) -> None:
 
     @mcp.tool()
     async def update_association_unit(unit_id: int, unit_data: dict[str, Any]) -> dict[str, Any]:
-        """Update an existing association unit."""
-        message = c.build_model(
-            "association_unit_put_message", "AssociationUnitPutMessage", unit_data
-        )
-        return await c.execute(
-            "update_association_unit",
-            lambda: (
-                client.association_units_api.external_api_association_units_update_association_unit(
-                    unit_id=unit_id, association_unit_put_message=message
-                )
-            ),
-        )
+        """Update an existing association unit, merging changes onto the current record.
+
+        ``unit_data`` only needs the fields you want to change; the current unit
+        is fetched first to supply required fields so partial edits succeed
+        without a full schema.
+        """
+
+        async def _do_update() -> Any:
+            api = client.association_units_api
+            current = await api.external_api_association_units_get_association_unit_by_id(
+                unit_id=unit_id
+            )
+            merged = c.merge_update(current, unit_data)
+            message = c.build_model(
+                "association_unit_put_message", "AssociationUnitPutMessage", merged
+            )
+            return await api.external_api_association_units_update_association_unit(
+                unit_id=unit_id, association_unit_put_message=message
+            )
+
+        return await c.execute("update_association_unit", _do_update)

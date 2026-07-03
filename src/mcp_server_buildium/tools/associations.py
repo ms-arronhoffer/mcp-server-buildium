@@ -85,14 +85,25 @@ def register_association_tools(mcp: FastMCP, client: BuildiumClient) -> None:
     async def update_association(
         association_id: int, association_data: dict[str, Any]
     ) -> dict[str, Any]:
-        """Update an existing association."""
-        message = AssociationPutMessage(**association_data)
-        return await c.execute(
-            "update_association",
-            lambda: client.associations_api.external_api_associations_update_association(
+        """Update an existing association, merging changes onto the current record.
+
+        ``association_data`` only needs the fields you want to change; the
+        current association is fetched first to supply required fields so partial
+        edits succeed without a full schema.
+        """
+
+        async def _do_update() -> Any:
+            api = client.associations_api
+            current = await api.external_api_associations_get_association_by_id(
+                association_id=association_id
+            )
+            merged = c.merge_update(current, association_data)
+            message = AssociationPutMessage(**merged)
+            return await api.external_api_associations_update_association(
                 association_id=association_id, association_put_message=message
-            ),
-        )
+            )
+
+        return await c.execute("update_association", _do_update)
 
     @mcp.tool()
     async def list_association_board_members(

@@ -193,6 +193,108 @@ def deep_merge(base: Any, patch: Any) -> Any:
     return patch
 
 
+# Maps a Buildium phone-number ``Type`` (as returned by GET endpoints, which
+# expose phone numbers as a list of ``{Number, Type}`` entries) onto the keyed
+# ``PhoneNumbers`` object shape (``Home``/``Work``/``Mobile``/``Fax``) that the
+# create/update ``PhoneNumbers`` message expects. Unmapped types are dropped
+# rather than guessed at, so we never place a number under the wrong label.
+_PHONE_TYPE_TO_KEY = {
+    "home": "home",
+    "office": "work",
+    "work": "work",
+    "cell": "mobile",
+    "mobile": "mobile",
+    "fax": "fax",
+}
+
+
+def phone_list_to_object(phones: Any) -> dict[str, str]:
+    """Convert a GET-style phone-number list into the PUT ``PhoneNumbers`` object.
+
+    GET endpoints return phone numbers as a list of ``{Number, Type}`` entries,
+    but the ``PhoneNumbers`` PUT/POST message expects a keyed object
+    (``Home``/``Work``/``Mobile``/``Fax``). Keys are normalized to snake_case so
+    the result lines up with a snake_case ``get_to_put_base`` record.
+    """
+    result: dict[str, str] = {}
+    if not isinstance(phones, list):
+        return result
+    for entry in phones:
+        if not isinstance(entry, dict):
+            continue
+        # Entries may use either the PascalCase JSON aliases (``Number``/``Type``)
+        # or the snake_case field names depending on how the record was fetched.
+        lowered = {to_snake_key(str(k)): v for k, v in entry.items()}
+        number = lowered.get("number")
+        key = _PHONE_TYPE_TO_KEY.get(str(lowered.get("type") or "").lower())
+        if number and key and key not in result:
+            result[key] = number
+    return result
+
+
+def get_to_put_base(current: Any, *, reshape_phones: bool = False) -> dict[str, Any]:
+    """Build a PUT-shaped dict from a fetched record, preserving alias keys.
+
+    Generated PUT models frequently require fields (e.g. ``FirstName``,
+    ``Address``) that a naive partial update would omit, so we seed those from
+    the existing record. The record's own key spelling (the PascalCase JSON
+    aliases emitted by ``to_dict``) is preserved so fields whose SDK attribute
+    name differs from ``to_snake_key(alias)`` (e.g. ``var_date`` / ``Date``) are
+    not dropped. Read-only fields (``id``, timestamps, ...) are carried along but
+    ignored by the target model. When ``reshape_phones`` is set, the GET-style
+    phone-number list is converted into the keyed object form the PUT message
+    expects (see :func:`phone_list_to_object`).
+    """
+    raw = current.to_dict() if hasattr(current, "to_dict") else dict(current or {})
+    if not isinstance(raw, dict):
+        return {}
+    base = dict(raw)
+    if reshape_phones:
+        for key in list(base):
+            if to_snake_key(str(key)) == "phone_numbers":
+                phones = phone_list_to_object(base.pop(key))
+                if phones:
+                    base["PhoneNumbers"] = phones
+                break
+    return base
+
+
+def _merge_normalized(base: Any, patch: Any) -> Any:
+    """Deep-merge ``patch`` onto ``base``, matching keys case-insensitively.
+
+    Keys are aligned by their snake_case form so a patch may use either the
+    PascalCase JSON aliases or the snake_case field names, but the ``base`` key
+    spelling is preserved on a match so valid aliases from a fetched record are
+    never lost. Patch keys with no counterpart in ``base`` are added as-is.
+    """
+    if isinstance(base, dict) and isinstance(patch, dict):
+        norm_to_key = {to_snake_key(str(k)): k for k in base}
+        merged = dict(base)
+        for pkey, pvalue in patch.items():
+            bkey = norm_to_key.get(to_snake_key(str(pkey)))
+            if bkey is None:
+                merged[pkey] = pvalue
+            elif isinstance(merged[bkey], dict) and isinstance(pvalue, dict):
+                merged[bkey] = _merge_normalized(merged[bkey], pvalue)
+            else:
+                merged[bkey] = pvalue
+        return merged
+    return patch
+
+
+def merge_update(current: Any, patch: Any, *, reshape_phones: bool = False) -> dict[str, Any]:
+    """Merge a caller-supplied partial ``patch`` onto a fetched record.
+
+    The fetched ``current`` record is reshaped into a PUT base (see
+    :func:`get_to_put_base`) and ``patch`` is deep-merged on top, so single-field
+    edits succeed without resupplying the full strict schema. Patch keys may use
+    either the PascalCase JSON aliases or the snake_case field names
+    interchangeably (see :func:`_merge_normalized`).
+    """
+    base = get_to_put_base(current, reshape_phones=reshape_phones)
+    return _merge_normalized(base, patch)
+
+
 # ---------------------------------------------------------------------------
 # Response envelope
 # ---------------------------------------------------------------------------

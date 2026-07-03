@@ -7,56 +7,6 @@ from fastmcp import FastMCP
 from ..buildium_client import BuildiumClient
 from . import _common as c
 
-# Maps a Buildium phone-number ``Type`` (as returned by GET endpoints, which
-# expose phone numbers as a list of ``{Number, Type}`` entries) onto the keyed
-# ``PhoneNumbers`` object shape (``Home``/``Work``/``Mobile``/``Fax``) that the
-# create/update ``PhoneNumbers`` message expects. Unmapped types are dropped
-# rather than guessed at, so we never place a number under the wrong label.
-_PHONE_TYPE_TO_KEY = {
-    "home": "home",
-    "office": "work",
-    "work": "work",
-    "cell": "mobile",
-    "mobile": "mobile",
-    "fax": "fax",
-}
-
-
-def _phone_list_to_object(phones: Any) -> dict[str, str]:
-    """Convert a GET-style phone-number list into the PUT ``PhoneNumbers`` object."""
-    result: dict[str, str] = {}
-    if not isinstance(phones, list):
-        return result
-    for entry in phones:
-        if not isinstance(entry, dict):
-            continue
-        number = entry.get("number")
-        key = _PHONE_TYPE_TO_KEY.get(str(entry.get("type") or "").lower())
-        if number and key and key not in result:
-            result[key] = number
-    return result
-
-
-def _tenant_get_to_put_base(current: Any) -> dict[str, Any]:
-    """Build a snake_case PUT-shaped dict from a fetched tenant record.
-
-    The generated PUT models require ``first_name``/``last_name`` and an address,
-    so a naive partial update (e.g. only a phone number) fails validation. We
-    seed those required fields from the existing record and reshape the phone
-    numbers from the GET list form into the keyed object form the PUT expects.
-    Extra read-only fields (``id``, timestamps, ...) are ignored by the model.
-    """
-    raw = current.to_dict() if hasattr(current, "to_dict") else dict(current or {})
-    base = c.normalize_keys(raw)
-    if isinstance(base, dict):
-        phones = _phone_list_to_object(base.get("phone_numbers"))
-        if phones:
-            base["phone_numbers"] = phones
-        else:
-            base.pop("phone_numbers", None)
-        return base
-    return {}
-
 
 def register_tenant_tools(mcp: FastMCP, client: BuildiumClient) -> None:
     """Register tenant-related tools with the MCP server."""
@@ -134,8 +84,7 @@ def register_tenant_tools(mcp: FastMCP, client: BuildiumClient) -> None:
             current = await client.rental_tenants_api.external_api_rental_tenants_get_tenant_by_id(
                 tenant_id=tenant_id
             )
-            base = _tenant_get_to_put_base(current)
-            merged = c.deep_merge(base, c.normalize_keys(tenant_data))
+            merged = c.merge_update(current, tenant_data, reshape_phones=True)
             message = c.build_model("rental_tenant_put_message", "RentalTenantPutMessage", merged)
             return await client.rental_tenants_api.external_api_rental_tenants_update_rental_tenant(
                 tenant_id=tenant_id, rental_tenant_put_message=message
@@ -196,8 +145,7 @@ def register_tenant_tools(mcp: FastMCP, client: BuildiumClient) -> None:
             current = await api.external_api_association_tenants_get_association_tenant_by_id(
                 tenant_id=tenant_id
             )
-            base = _tenant_get_to_put_base(current)
-            merged = c.deep_merge(base, c.normalize_keys(tenant_data))
+            merged = c.merge_update(current, tenant_data, reshape_phones=True)
             message = c.build_model(
                 "association_tenant_put_message", "AssociationTenantPutMessage", merged
             )

@@ -73,11 +73,22 @@ def register_work_order_tools(mcp: FastMCP, client: BuildiumClient) -> None:
     async def update_work_order(
         work_order_id: int, work_order_data: dict[str, Any]
     ) -> dict[str, Any]:
-        """Update an existing work order."""
-        message = c.build_model("work_order_put_message", "WorkOrderPutMessage", work_order_data)
-        return await c.execute(
-            "update_work_order",
-            lambda: client.work_orders_api.external_api_work_orders_update_work_order(
+        """Update an existing work order, merging changes onto the current record.
+
+        ``work_order_data`` only needs the fields you want to change; the current
+        work order is fetched first to supply required fields so partial edits
+        succeed without a full schema.
+        """
+
+        async def _do_update() -> Any:
+            api = client.work_orders_api
+            current = await api.external_api_work_orders_get_work_order_by_id(
+                work_order_id=work_order_id
+            )
+            merged = c.merge_update(current, work_order_data)
+            message = c.build_model("work_order_put_message", "WorkOrderPutMessage", merged)
+            return await api.external_api_work_orders_update_work_order(
                 work_order_id=work_order_id, work_order_put_message=message
-            ),
-        )
+            )
+
+        return await c.execute("update_work_order", _do_update)

@@ -70,14 +70,23 @@ def register_bill_tools(mcp: FastMCP, client: BuildiumClient) -> None:
 
     @mcp.tool()
     async def update_bill(bill_id: int, bill_data: dict[str, Any]) -> dict[str, Any]:
-        """Update an existing bill."""
-        message = c.build_model("bill_put_message", "BillPutMessage", bill_data)
-        return await c.execute(
-            "update_bill",
-            lambda: client.bills_api.external_api_bills_update_bill(
+        """Update an existing bill, merging changes onto the current record.
+
+        ``bill_data`` only needs the fields you want to change; the current bill
+        is fetched first to supply required fields so partial edits succeed
+        without a full schema.
+        """
+
+        async def _do_update() -> Any:
+            api = client.bills_api
+            current = await api.external_api_bills_get_bill_by_id(bill_id=bill_id)
+            merged = c.merge_update(current, bill_data)
+            message = c.build_model("bill_put_message", "BillPutMessage", merged)
+            return await api.external_api_bills_update_bill(
                 bill_id=bill_id, bill_put_message=message
-            ),
-        )
+            )
+
+        return await c.execute("update_bill", _do_update)
 
     @mcp.tool()
     async def list_bill_payments(bill_id: int, limit: int = 100, offset: int = 0) -> dict[str, Any]:

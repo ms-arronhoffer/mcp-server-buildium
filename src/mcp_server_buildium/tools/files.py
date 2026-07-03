@@ -56,14 +56,23 @@ def register_file_tools(mcp: FastMCP, client: BuildiumClient) -> None:
 
     @mcp.tool()
     async def update_file(file_id: int, file_data: dict[str, Any]) -> dict[str, Any]:
-        """Update file metadata."""
-        message = c.build_model("file_put_message", "FilePutMessage", file_data)
-        return await c.execute(
-            "update_file",
-            lambda: client.files_api.external_api_files_update_file(
+        """Update file metadata, merging changes onto the current record.
+
+        ``file_data`` only needs the fields you want to change; the current file
+        is fetched first to supply required fields so partial edits succeed
+        without a full schema.
+        """
+
+        async def _do_update() -> Any:
+            api = client.files_api
+            current = await api.external_api_files_get_file_by_id(file_id=file_id)
+            merged = c.merge_update(current, file_data)
+            message = c.build_model("file_put_message", "FilePutMessage", merged)
+            return await api.external_api_files_update_file(
                 file_id=file_id, file_put_message=message
-            ),
-        )
+            )
+
+        return await c.execute("update_file", _do_update)
 
     @mcp.tool()
     async def create_file_upload_request(upload_request: dict[str, Any]) -> dict[str, Any]:
@@ -114,13 +123,22 @@ def register_file_tools(mcp: FastMCP, client: BuildiumClient) -> None:
     async def update_file_category(
         category_id: int, category_data: dict[str, Any]
     ) -> dict[str, Any]:
-        """Update an existing file category."""
-        message = c.build_model(
-            "file_category_put_message", "FileCategoryPutMessage", category_data
-        )
-        return await c.execute(
-            "update_file_category",
-            lambda: client.files_api.external_api_file_categories_update_file_category(
+        """Update an existing file category, merging changes onto the current record.
+
+        ``category_data`` only needs the fields you want to change; the current
+        category is fetched first to supply required fields so partial edits
+        succeed without a full schema.
+        """
+
+        async def _do_update() -> Any:
+            api = client.files_api
+            current = await api.external_api_file_categories_get_file_category_by_id(
+                file_category_id=category_id
+            )
+            merged = c.merge_update(current, category_data)
+            message = c.build_model("file_category_put_message", "FileCategoryPutMessage", merged)
+            return await api.external_api_file_categories_update_file_category(
                 file_category_id=category_id, file_category_put_message=message
-            ),
-        )
+            )
+
+        return await c.execute("update_file_category", _do_update)
