@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import random
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -30,19 +32,43 @@ except Exception:  # pragma: no cover - SDK always present in practice
 
 logger = get_logger("mcp_server_buildium.tools")
 
-# Pagination guardrails (Buildium caps page size at 1000).
-MAX_LIMIT = 1000
+
+def _env_int(name: str, default: int) -> int:
+    """Read a positive integer from the environment, falling back to ``default``."""
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    """Read a float from the environment, falling back to ``default``."""
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
+# Pagination guardrails (Buildium caps page size at 1000). Overridable via env so
+# operators can tighten limits without code changes.
+MAX_LIMIT = _env_int("BUILDIUM_MAX_PAGE_LIMIT", 1000)
 MIN_LIMIT = 1
-DEFAULT_LIMIT = 100
+DEFAULT_LIMIT = _env_int("BUILDIUM_DEFAULT_PAGE_LIMIT", 100)
 
 # Retry configuration for transient upstream failures.
 RETRYABLE_STATUS = {429, 500, 502, 503, 504}
-MAX_RETRIES = 3
-BASE_BACKOFF_SECONDS = 0.5
-MAX_BACKOFF_SECONDS = 8.0
+MAX_RETRIES = _env_int("BUILDIUM_MAX_RETRIES", 3)
+BASE_BACKOFF_SECONDS = _env_float("BUILDIUM_BASE_BACKOFF_SECONDS", 0.5)
+MAX_BACKOFF_SECONDS = _env_float("BUILDIUM_MAX_BACKOFF_SECONDS", 8.0)
 
 # Per-request timeout (seconds) passed to the SDK.
-REQUEST_TIMEOUT_SECONDS = 30.0
+REQUEST_TIMEOUT_SECONDS = _env_float("BUILDIUM_REQUEST_TIMEOUT_SECONDS", 30.0)
 
 # ---------------------------------------------------------------------------
 # Operation registry (tool name -> Buildium OpenAPI operationId)
@@ -52,10 +78,56 @@ REQUEST_TIMEOUT_SECONDS = 30.0
 #: a real Buildium endpoint.
 TOOL_OPERATIONS: dict[str, str] = {}
 
+#: Maps MCP tool name -> classification metadata used by the security policy and
+#: audit layers. Populated by :func:`register_operation` so there is a single
+#: source of truth for whether a tool reads or mutates data and whether it
+#: touches financially sensitive resources.
+TOOL_METADATA: dict[str, dict[str, Any]] = {}
+
+# Tool-name prefixes that identify read vs. mutating operations.
+_READ_PREFIXES = ("list_", "get_")
+_WRITE_PREFIXES = ("create_", "update_", "delete_")
+
+# Substrings that mark a tool as financially sensitive (bills, bank accounts,
+# general ledger, payments, and file up/download URL issuance).
+_SENSITIVE_MARKERS = (
+    "bill",
+    "bank_account",
+    "gl_",
+    "payment",
+    "file_download",
+    "file_upload",
+)
+
+
+def classify_op_type(tool_name: str) -> str:
+    """Classify a tool as ``"read"`` or ``"write"`` from its name.
+
+    Defaults to ``"read"`` for server-local tools (e.g. ``health_check``) so an
+    unknown tool never accidentally counts as a mutation.
+    """
+    if tool_name.startswith(_WRITE_PREFIXES):
+        return "write"
+    return "read"
+
+
+def classify_sensitive(tool_name: str) -> bool:
+    """Return True if a tool touches financially sensitive resources."""
+    return any(marker in tool_name for marker in _SENSITIVE_MARKERS)
+
 
 def register_operation(tool_name: str, operation_id: str) -> None:
-    """Record the OpenAPI operation a tool maps to (for spec validation)."""
+    """Record the OpenAPI operation a tool maps to (for spec validation).
+
+    Also records read/write and sensitivity classification in
+    :data:`TOOL_METADATA` so the security policy and audit layers share one
+    source of truth.
+    """
     TOOL_OPERATIONS[tool_name] = operation_id
+    TOOL_METADATA[tool_name] = {
+        "op_type": classify_op_type(tool_name),
+        "sensitive": classify_sensitive(tool_name),
+    }
 
 
 def build_model(module: str, name: str, data: dict[str, Any]) -> Any:
@@ -89,25 +161,47 @@ def _serialize(value: Any) -> Any:
     return value
 
 
-def success(data: Any, *, count: int | None = None) -> dict[str, Any]:
-    """Build a successful ``{data, count, error}`` envelope.
+def success(
+    data: Any, *, count: int | None = None, meta: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """Build a successful ``{data, count, error, meta}`` envelope.
 
     Args:
         data: The serialized payload.
         count: Item count. Auto-computed for lists when not provided.
+        meta: Optional metadata block (pagination, timing, applied filters). The
+            ``meta`` key is always present for a stable schema; it is ``None``
+            when no metadata is supplied.
     """
     serialized = _serialize(data)
     if count is None and isinstance(serialized, list):
         count = len(serialized)
-    return {"data": serialized, "count": count, "error": None}
+    return {"data": serialized, "count": count, "error": None, "meta": meta}
 
 
-def failure(message: str, *, status: int | None = None, code: str | None = None) -> dict[str, Any]:
-    """Build an error ``{data, count, error}`` envelope."""
+def failure(
+    message: str,
+    *,
+    status: int | None = None,
+    code: str | None = None,
+    hint: str | None = None,
+    meta: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build an error ``{data, count, error, meta}`` envelope.
+
+    Args:
+        message: Human-friendly error message.
+        status: Upstream HTTP status code, if applicable.
+        code: Stable machine-readable error code (e.g. ``validation_error``,
+            ``api_error``, ``forbidden``, ``rate_limited``, ``internal_error``).
+        hint: Optional actionable hint for resolving the error.
+        meta: Optional metadata block (timing, etc.).
+    """
     return {
         "data": None,
         "count": None,
-        "error": {"message": message, "status": status, "code": code},
+        "error": {"message": message, "status": status, "code": code, "hint": hint},
+        "meta": meta,
     }
 
 
@@ -143,25 +237,40 @@ async def execute(
     call: Callable[[], Awaitable[Any]],
     *,
     count: int | None = None,
+    meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Execute an SDK call, returning a consistent envelope.
 
-    Adds bounded ret/backoff on transient (429/5xx) errors, maps
+    Adds bounded retry/backoff on transient (429/5xx) errors, maps
     ``ApiException`` into a clean error envelope without leaking credentials,
-    and logs structured events.
+    logs structured events, and attaches a ``meta`` block with timing and
+    attempt information.
 
     Args:
         tool_name: Name of the calling tool (for logging).
         call: Zero-arg coroutine factory performing the SDK call.
         count: Optional explicit item count for the envelope.
+        meta: Optional metadata (e.g. pagination) merged into the envelope's
+            ``meta`` block alongside timing information.
     """
+    started = time.monotonic()
+
+    def _meta(attempt: int) -> dict[str, Any]:
+        block: dict[str, Any] = {
+            "duration_ms": round((time.monotonic() - started) * 1000, 2),
+            "attempts": attempt,
+        }
+        if meta:
+            block.update(meta)
+        return block
+
     attempt = 0
     while True:
         attempt += 1
         try:
             result = await call()
             log_event(logger, logging.INFO, "tool.success", tool=tool_name, attempt=attempt)
-            return success(result, count=count)
+            return success(result, count=count, meta=_meta(attempt))
         except ApiException as exc:
             status = _status_of(exc)
             reason = getattr(exc, "reason", None) or str(exc)
@@ -194,13 +303,14 @@ async def execute(
                 f"Buildium API error: {reason}",
                 status=status,
                 code="api_error",
+                meta=_meta(attempt),
             )
         except ValueError as exc:
             # Input validation errors (e.g. bad enum) are not retryable.
             log_event(
                 logger, logging.WARNING, "tool.validation_error", tool=tool_name, reason=str(exc)
             )
-            return failure(str(exc), code="validation_error")
+            return failure(str(exc), code="validation_error", meta=_meta(attempt))
         except Exception as exc:  # noqa: BLE001 - surface unexpected errors cleanly
             log_event(
                 logger,
@@ -212,4 +322,5 @@ async def execute(
             return failure(
                 f"Unexpected error calling Buildium: {type(exc).__name__}",
                 code="internal_error",
+                meta=_meta(attempt),
             )

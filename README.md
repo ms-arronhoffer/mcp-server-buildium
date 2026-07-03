@@ -11,8 +11,10 @@
 ## Features
 
 * 🔐 **API Key Authentication** - Secure server-to-server authentication via headers
-* 🏘️ **91 Tools Across 14 Categories** - Comprehensive property management coverage
+* 🏘️ **90 Tools Across 14 Categories** - Comprehensive property management coverage
 * 📋 **Selective Tool Loading** - Enable only the categories you need
+* 🛡️ **Roles & Guardrails** - Read-only mode, RBAC roles, allow/deny lists, rate limiting
+* 🧾 **Audit Trail** - Structured, redacted audit events with pluggable sinks and reporting
 * 🏢 **Multi-Property Types** - Rentals, associations, and units
 * 🔌 **MCP Protocol** - Compatible with Claude Desktop, Cursor, and other MCP clients
 
@@ -79,9 +81,43 @@ Control which tool categories are enabled using the `BUILDIUM_CATEGORIES` enviro
 | `general_ledger` | 4 | General ledger accounts and transactions |
 | `work_orders` | 4 | Work order management |
 
-**Total: 90 category tools + a built-in `health_check` tool (91 total).**
+**Total: 90 category tools + built-in `health_check` and `audit_summary` tools (92 total).**
 
 If `BUILDIUM_CATEGORIES` is not set, all 90 tools across all 14 categories are enabled.
+
+### Security, Roles & Audit
+
+The server includes an opt-in security layer. With no extra configuration it
+behaves as before (all tools enabled, logging to stderr). Configure roles and
+guardrails via environment variables:
+
+| Env var | Description |
+|---------|-------------|
+| `BUILDIUM_ROLE` | `readonly`, `operator`, `admin` (default), or `custom` |
+| `BUILDIUM_READONLY` | `true` disables all mutating tools |
+| `BUILDIUM_BLOCK_SENSITIVE` | `true` disables financially sensitive tools (bills, bank, GL, payments, file URLs) |
+| `BUILDIUM_ALLOW_TOOLS` | Comma-separated strict whitelist of tool names |
+| `BUILDIUM_DENY_TOOLS` | Comma-separated blacklist (deny always wins) |
+| `BUILDIUM_RATE_LIMIT_PER_MINUTE` | Cap invocations per 60s window (0 = off) |
+| `BUILDIUM_AUDIT_SINK` | `log` (default), `file`, or `none` |
+| `BUILDIUM_AUDIT_FILE` | Path for the `file` audit sink |
+
+Forbidden tools are not registered, so they are never advertised to clients.
+Every invocation (and every denial/rate-limit) is audited with redacted
+arguments. See [`docs/security-and-audit.md`](docs/security-and-audit.md) for the
+full guide, including the `scripts/generate_audit_report.py` reporting tool.
+
+### Response Envelope
+
+Every tool returns a stable envelope:
+
+```json
+{ "data": {}, "count": 1, "error": null, "meta": { "duration_ms": 12.3, "attempts": 1 } }
+```
+
+On failure, `error` carries a machine-readable `code` (`validation_error`,
+`api_error`, `forbidden`, `rate_limited`, `internal_error`), a human `message`,
+an optional upstream `status`, and an optional `hint`.
 
 ### Environment File
 
@@ -178,7 +214,10 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 }
 ```
 
-## Available Tools (81 total)
+## Available Tools (90 category tools)
+
+> In addition to the 90 category tools below, the server exposes two built-in
+> tools: `health_check` and `audit_summary` (admin-only), for a total of 92.
 
 ### Associations (6 tools)
 * `list_associations` - List all associations
@@ -670,16 +709,26 @@ See `Makefile` for more details.
 mcp-server-buildium/
 ├── src/mcp_server_buildium/
 │   ├── __init__.py
-│   ├── server.py           # Main FastMCP server
-│   ├── config.py           # Configuration management
+│   ├── server.py           # Main FastMCP server + guarded registration
+│   ├── config.py           # Configuration management (incl. roles & audit)
 │   ├── buildium_client.py  # API key auth & API client
+│   ├── logging_config.py   # Structured, secret-scrubbing logging
+│   ├── audit.py            # Pluggable audit sinks + reporting helpers
+│   ├── security/
+│   │   ├── policy.py       # Roles, guardrails, rate limiter
+│   │   └── registration.py # GuardedMCP: enforcement + audit wrapper
 │   └── tools/
+│       ├── _common.py      # Envelope, retries, classification, execute()
 │       ├── associations.py # Association tools
 │       ├── leases.py       # Lease tools
-│       └── rentals.py      # Rental tools
+│       └── ...             # One module per category
+├── scripts/
+│   ├── generate_tool_coverage.py
+│   └── generate_audit_report.py
 ├── tests/
-│   ├── test_buildium_client.py
-│   └── test_integration.py
+├── docs/
+│   ├── tool-coverage.md
+│   └── security-and-audit.md
 ├── pyproject.toml
 └── README.md
 ```

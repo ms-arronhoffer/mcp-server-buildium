@@ -4,10 +4,13 @@ from typing import Any
 
 from fastmcp import FastMCP
 
+from . import audit as audit_mod
 from .auth import build_auth
 from .buildium_client import BuildiumClient
 from .config import BuildiumConfig
 from .logging_config import configure_logging, get_logger
+from .security.policy import RateLimiter, ToolPolicy
+from .security.registration import GuardedMCP
 from .tools import _common as c
 from .tools.applicants import register_applicant_tools
 from .tools.associations import register_association_tools
@@ -32,6 +35,17 @@ logger = get_logger("mcp_server_buildium.server")
 config = BuildiumConfig.from_env()
 buildium_client = BuildiumClient(config=config)
 
+# Resolve the security policy, audit recorder, and rate limiter from config.
+policy = ToolPolicy.from_config(config)
+audit_recorder = audit_mod.AuditRecorder.from_config(config)
+rate_limiter = RateLimiter(config.rate_limit_per_minute)
+logger.info(
+    "Security policy resolved role=%s readonly=%s block_sensitive=%s",
+    policy.role,
+    policy.readonly,
+    policy.block_sensitive,
+)
+
 # Optional authentication. Precedence: Entra ID JWT → static bearer token → none.
 # Remote clients (e.g. the browser extension) authenticate with Entra; the upstream
 # Buildium API key never leaves the server.
@@ -39,8 +53,10 @@ auth = build_auth(config)
 if auth is not None:
     logger.info("MCP authentication enabled (%s)", type(auth).__name__)
 
-# Create FastMCP server
-mcp = FastMCP("buildium", auth=auth)
+# Create FastMCP server and wrap it so the security policy, rate limiter, and
+# audit trail are applied centrally to every registered tool.
+_base_mcp = FastMCP("buildium", auth=auth)
+mcp = GuardedMCP(_base_mcp, policy, audit_recorder, rate_limiter)
 
 # Map category name -> registration function so registration is data-driven.
 _CATEGORY_REGISTRARS = {
@@ -69,9 +85,10 @@ for _category, _register in _CATEGORY_REGISTRARS.items():
 async def health_check() -> dict[str, Any]:
     """Report server health and configuration status.
 
-    Returns a ``{data, count, error}`` envelope describing the server version,
-    configured Buildium base URL, whether credentials are present, and the set
-    of enabled tool categories. Does not leak secret values.
+    Returns a ``{data, count, error, meta}`` envelope describing the server
+    version, configured Buildium base URL, whether credentials are present, the
+    set of enabled tool categories, and the effective security policy. Does not
+    leak secret values.
     """
     enabled = config.get_enabled_categories()
     if config.entra_enabled():
@@ -88,6 +105,9 @@ async def health_check() -> dict[str, Any]:
         "transport": config.transport,
         "auth_mode": auth_mode,
         "enabled_categories": sorted(enabled) if enabled is not None else "all",
+        "policy": policy.describe(),
+        "rate_limit_per_minute": rate_limiter.per_minute,
+        "audit_sink": config.audit_sink,
     }
     return c.success(data)
 
@@ -115,6 +135,28 @@ def _build_cors_middleware() -> list:
             allow_credentials="*" not in origins,
         )
     ]
+
+
+@mcp.tool()
+async def audit_summary(limit: int = 500) -> dict[str, Any]:
+    """Summarize recent audit activity (admin only).
+
+    Reads the configured file audit sink and returns aggregate counts by tool,
+    outcome, and operation type, plus a list of recent denied/rate-limited
+    attempts. Only available with the ``admin`` role and when
+    ``BUILDIUM_AUDIT_SINK=file`` is configured.
+
+    Args:
+        limit: Maximum number of most-recent audit records to scan (1-10000).
+    """
+    if config.audit_sink != "file" or not config.audit_file:
+        return c.failure(
+            "Audit summary requires BUILDIUM_AUDIT_SINK=file with BUILDIUM_AUDIT_FILE set.",
+            code="validation_error",
+            hint="Set BUILDIUM_AUDIT_SINK=file and BUILDIUM_AUDIT_FILE=/path/to/audit.log.",
+        )
+    summary = audit_mod.summarize_file(config.audit_file, limit=max(1, min(10000, int(limit))))
+    return c.success(summary)
 
 
 def main() -> None:

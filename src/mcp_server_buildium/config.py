@@ -7,6 +7,12 @@ from pydantic_settings import BaseSettings
 # Load .env file if it exists
 load_dotenv()
 
+# Built-in security roles (see security.policy for semantics).
+ROLES = frozenset({"readonly", "operator", "admin", "custom"})
+
+# Valid audit sink names.
+AUDIT_SINKS = frozenset({"log", "file", "none"})
+
 # Tool categories supported by the server. Kept here so both the server and
 # validation tooling share a single source of truth.
 ALL_CATEGORIES = frozenset(
@@ -138,6 +144,57 @@ class BuildiumConfig(BaseSettings):
         ),
     )
 
+    # -- Security guardrails (all optional; defaults preserve prior behavior) --
+    role: str = Field(
+        default="admin",
+        description=(
+            "Security role controlling which tools are permitted: 'readonly' "
+            "(reads only), 'operator' (reads + non-sensitive writes), 'admin' "
+            "(all, default), or 'custom' (shaped by allow/deny lists)."
+        ),
+    )
+    readonly: bool = Field(
+        default=False,
+        description="Global kill switch: when true, all mutating tools are disabled.",
+    )
+    block_sensitive: bool = Field(
+        default=False,
+        description=(
+            "When true, disable financially sensitive tools (bills, bank accounts, "
+            "general ledger, payments, file upload/download URLs)."
+        ),
+    )
+    allow_tools: str | None = Field(
+        default=None,
+        description=(
+            "Comma-separated whitelist of tool names to permit (on top of the role). "
+            "When set, only these tools (minus any denied) are enabled."
+        ),
+    )
+    deny_tools: str | None = Field(
+        default=None,
+        description="Comma-separated blacklist of tool names to always disable (deny wins).",
+    )
+    rate_limit_per_minute: int = Field(
+        default=0,
+        description=(
+            "Maximum tool invocations per rolling 60-second window (0 disables rate limiting)."
+        ),
+    )
+
+    # -- Audit trail ---------------------------------------------------------
+    audit_sink: str = Field(
+        default="log",
+        description=(
+            "Audit sink: 'log' (structured stderr JSON, default), 'file' "
+            "(newline-delimited JSON at BUILDIUM_AUDIT_FILE), or 'none' (disabled)."
+        ),
+    )
+    audit_file: str | None = Field(
+        default=None,
+        description="Path for the file audit sink (required when BUILDIUM_AUDIT_SINK=file).",
+    )
+
     model_config = {
         "env_prefix": "BUILDIUM_",
         "case_sensitive": False,
@@ -169,6 +226,19 @@ class BuildiumConfig(BaseSettings):
                     f"Unknown BUILDIUM_CATEGORIES: {sorted(invalid)}. "
                     f"Valid categories: {sorted(ALL_CATEGORIES)}"
                 )
+        role = (self.role or "").strip().lower()
+        if role not in ROLES:
+            raise ValueError(f"Unknown BUILDIUM_ROLE: {self.role!r}. Valid roles: {sorted(ROLES)}")
+        sink = (self.audit_sink or "").strip().lower()
+        if sink not in AUDIT_SINKS:
+            raise ValueError(
+                f"Unknown BUILDIUM_AUDIT_SINK: {self.audit_sink!r}. "
+                f"Valid values: {sorted(AUDIT_SINKS)}"
+            )
+        if sink == "file" and not (self.audit_file and self.audit_file.strip()):
+            raise ValueError("BUILDIUM_AUDIT_SINK=file requires BUILDIUM_AUDIT_FILE to be set")
+        if self.rate_limit_per_minute < 0:
+            raise ValueError("BUILDIUM_RATE_LIMIT_PER_MINUTE must be >= 0")
         return self
 
     @classmethod

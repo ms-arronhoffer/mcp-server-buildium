@@ -72,7 +72,7 @@ def test_every_registered_tool_is_mapped_or_local(
     registered_tool_names: list[str], tool_operations: dict[str, str]
 ) -> None:
     """Every tool either maps to a spec operation or is an allowed server-local tool."""
-    server_local = {"health_check"}
+    server_local = {"health_check", "audit_summary"}
     unmapped = set(registered_tool_names) - set(tool_operations) - server_local
     assert not unmapped, f"Tools with no operation mapping: {sorted(unmapped)}"
 
