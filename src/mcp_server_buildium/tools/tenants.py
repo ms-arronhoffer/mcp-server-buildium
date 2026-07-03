@@ -7,6 +7,56 @@ from fastmcp import FastMCP
 from ..buildium_client import BuildiumClient
 from . import _common as c
 
+# Maps a Buildium phone-number ``Type`` (as returned by GET endpoints, which
+# expose phone numbers as a list of ``{Number, Type}`` entries) onto the keyed
+# ``PhoneNumbers`` object shape (``Home``/``Work``/``Mobile``/``Fax``) that the
+# create/update ``PhoneNumbers`` message expects. Unmapped types are dropped
+# rather than guessed at, so we never place a number under the wrong label.
+_PHONE_TYPE_TO_KEY = {
+    "home": "home",
+    "office": "work",
+    "work": "work",
+    "cell": "mobile",
+    "mobile": "mobile",
+    "fax": "fax",
+}
+
+
+def _phone_list_to_object(phones: Any) -> dict[str, str]:
+    """Convert a GET-style phone-number list into the PUT ``PhoneNumbers`` object."""
+    result: dict[str, str] = {}
+    if not isinstance(phones, list):
+        return result
+    for entry in phones:
+        if not isinstance(entry, dict):
+            continue
+        number = entry.get("number")
+        key = _PHONE_TYPE_TO_KEY.get(str(entry.get("type") or "").lower())
+        if number and key and key not in result:
+            result[key] = number
+    return result
+
+
+def _tenant_get_to_put_base(current: Any) -> dict[str, Any]:
+    """Build a snake_case PUT-shaped dict from a fetched tenant record.
+
+    The generated PUT models require ``first_name``/``last_name`` and an address,
+    so a naive partial update (e.g. only a phone number) fails validation. We
+    seed those required fields from the existing record and reshape the phone
+    numbers from the GET list form into the keyed object form the PUT expects.
+    Extra read-only fields (``id``, timestamps, ...) are ignored by the model.
+    """
+    raw = current.to_dict() if hasattr(current, "to_dict") else dict(current or {})
+    base = c.normalize_keys(raw)
+    if isinstance(base, dict):
+        phones = _phone_list_to_object(base.get("phone_numbers"))
+        if phones:
+            base["phone_numbers"] = phones
+        else:
+            base.pop("phone_numbers", None)
+        return base
+    return {}
+
 
 def register_tenant_tools(mcp: FastMCP, client: BuildiumClient) -> None:
     """Register tenant-related tools with the MCP server."""
@@ -70,14 +120,28 @@ def register_tenant_tools(mcp: FastMCP, client: BuildiumClient) -> None:
 
     @mcp.tool()
     async def update_rental_tenant(tenant_id: int, tenant_data: dict[str, Any]) -> dict[str, Any]:
-        """Update an existing rental tenant."""
-        message = c.build_model("rental_tenant_put_message", "RentalTenantPutMessage", tenant_data)
-        return await c.execute(
-            "update_rental_tenant",
-            lambda: client.rental_tenants_api.external_api_rental_tenants_update_rental_tenant(
+        """Update an existing rental tenant, merging changes onto the current record.
+
+        ``tenant_data`` only needs to contain the fields you want to change; the
+        current tenant is fetched first and used to supply required fields
+        (``FirstName``, ``LastName``, ``Address``) so partial edits succeed
+        without a full schema. Keys may use either the JSON aliases
+        (``PhoneNumbers``) or field names (``phone_numbers``). Phone numbers use
+        the keyed object form, e.g. ``{"phone_numbers": {"mobile": "555-555-5555"}}``.
+        """
+
+        async def _do_update() -> Any:
+            current = await client.rental_tenants_api.external_api_rental_tenants_get_tenant_by_id(
+                tenant_id=tenant_id
+            )
+            base = _tenant_get_to_put_base(current)
+            merged = c.deep_merge(base, c.normalize_keys(tenant_data))
+            message = c.build_model("rental_tenant_put_message", "RentalTenantPutMessage", merged)
+            return await client.rental_tenants_api.external_api_rental_tenants_update_rental_tenant(
                 tenant_id=tenant_id, rental_tenant_put_message=message
-            ),
-        )
+            )
+
+        return await c.execute("update_rental_tenant", _do_update)
 
     # Association Tenants
     @mcp.tool()
@@ -117,15 +181,28 @@ def register_tenant_tools(mcp: FastMCP, client: BuildiumClient) -> None:
     async def update_association_tenant(
         tenant_id: int, tenant_data: dict[str, Any]
     ) -> dict[str, Any]:
-        """Update an existing association tenant."""
-        message = c.build_model(
-            "association_tenant_put_message", "AssociationTenantPutMessage", tenant_data
-        )
-        return await c.execute(
-            "update_association_tenant",
-            lambda: (
-                client.association_tenants_api.external_api_association_tenants_update_association_tenant(
-                    tenant_id=tenant_id, association_tenant_put_message=message
-                )
-            ),
-        )
+        """Update an existing association tenant, merging changes onto the current record.
+
+        ``tenant_data`` only needs the fields you want to change; the current
+        tenant is fetched first to supply required fields (``FirstName``,
+        ``LastName``, ``PrimaryAddress``) so partial edits succeed without a
+        full schema. Keys may use JSON aliases or field names, and phone numbers
+        use the keyed object form, e.g.
+        ``{"phone_numbers": {"mobile": "555-555-5555"}}``.
+        """
+
+        async def _do_update() -> Any:
+            api = client.association_tenants_api
+            current = await api.external_api_association_tenants_get_association_tenant_by_id(
+                tenant_id=tenant_id
+            )
+            base = _tenant_get_to_put_base(current)
+            merged = c.deep_merge(base, c.normalize_keys(tenant_data))
+            message = c.build_model(
+                "association_tenant_put_message", "AssociationTenantPutMessage", merged
+            )
+            return await api.external_api_association_tenants_update_association_tenant(
+                tenant_id=tenant_id, association_tenant_put_message=message
+            )
+
+        return await c.execute("update_association_tenant", _do_update)

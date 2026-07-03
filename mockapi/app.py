@@ -54,6 +54,26 @@ def _require(doc: dict[str, Any] | None, what: str) -> dict[str, Any]:
     return doc
 
 
+# Buildium stores tenant phone numbers as a list of ``{Number, Type}`` entries,
+# but the create/update messages accept the keyed ``{Home, Work, Mobile, Fax}``
+# object form. The real API normalizes the object back into the list shape it
+# returns; mirror that here so PUT responses deserialize as ``TenantMessage``.
+_PUT_PHONE_KEY_TO_TYPE = {"home": "Home", "work": "Office", "mobile": "Cell", "fax": "Fax"}
+
+
+def _normalize_tenant_phone_numbers(body: dict[str, Any]) -> dict[str, Any]:
+    """Convert a keyed ``PhoneNumbers`` object in ``body`` into Buildium's list form."""
+    phones = body.get("PhoneNumbers")
+    if not isinstance(phones, dict):
+        return body
+    converted = [
+        {"Number": number, "Type": _PUT_PHONE_KEY_TO_TYPE.get(str(key).lower(), "Other")}
+        for key, number in phones.items()
+        if number
+    ]
+    return {**body, "PhoneNumbers": converted}
+
+
 def create_app() -> FastAPI:
     """Build and return the FastAPI mock application."""
     app = FastAPI(title="Buildium Mock API", version="1.0.0")
@@ -198,6 +218,7 @@ def create_app() -> FastAPI:
 
     @app.put("/v1/leases/tenants/{tenant_id}")
     async def update_lease_tenant(tenant_id: int, body: dict, db: Session = Depends(get_session)):
+        body = _normalize_tenant_phone_numbers(body)
         return _require(store.update_doc(db, "lease_tenants", tenant_id, body), "Tenant")
 
     @app.get("/v1/leases/{lease_id}")
@@ -300,10 +321,15 @@ def create_app() -> FastAPI:
     async def create_association_tenant(body: dict, db: Session = Depends(get_session)):
         return store.create_doc(db, "association_tenants", body)
 
+    @app.get("/v1/associations/tenants/{tenant_id}")
+    async def get_association_tenant(tenant_id: int, db: Session = Depends(get_session)):
+        return _require(store.get_doc(db, "association_tenants", tenant_id), "Association tenant")
+
     @app.put("/v1/associations/tenants/{tenant_id}")
     async def update_association_tenant(
         tenant_id: int, body: dict, db: Session = Depends(get_session)
     ):
+        body = _normalize_tenant_phone_numbers(body)
         return _require(
             store.update_doc(db, "association_tenants", tenant_id, body), "Association tenant"
         )

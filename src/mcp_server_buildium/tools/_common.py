@@ -12,6 +12,7 @@ import asyncio
 import logging
 import os
 import random
+import re
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -140,6 +141,56 @@ def build_model(module: str, name: str, data: dict[str, Any]) -> Any:
         return getattr(mod, name)(**data)
     except ImportError:  # pragma: no cover - SDK always present in practice
         return data
+
+
+# ---------------------------------------------------------------------------
+# Partial-update helpers
+# ---------------------------------------------------------------------------
+# Generated SDK models use PascalCase JSON aliases (e.g. ``FirstName``) but also
+# accept their snake_case field names (``first_name``) because ``populate_by_name``
+# is enabled. To merge a caller-supplied partial patch onto an existing record we
+# first normalize every key to snake_case so the two structures line up regardless
+# of which casing the LLM emitted.
+_SNAKE_STEP1 = re.compile(r"(.)([A-Z][a-z]+)")
+_SNAKE_STEP2 = re.compile(r"([a-z0-9])([A-Z])")
+
+
+def to_snake_key(key: str) -> str:
+    """Convert a PascalCase/camelCase key to snake_case (snake_case is unchanged)."""
+    interim = _SNAKE_STEP1.sub(r"\1_\2", key)
+    return _SNAKE_STEP2.sub(r"\1_\2", interim).lower()
+
+
+def normalize_keys(obj: Any) -> Any:
+    """Recursively convert all mapping keys in ``obj`` to snake_case.
+
+    Lists and scalars are returned structurally unchanged (their nested mappings
+    are still normalized). This lets partial patches use either the PascalCase
+    JSON aliases or the snake_case field names interchangeably.
+    """
+    if isinstance(obj, dict):
+        return {to_snake_key(str(k)): normalize_keys(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [normalize_keys(v) for v in obj]
+    return obj
+
+
+def deep_merge(base: Any, patch: Any) -> Any:
+    """Recursively merge ``patch`` onto ``base``, returning a new structure.
+
+    Nested dicts are merged key-by-key so a partial patch only overrides the
+    fields it specifies; any other value (including lists and scalars) in
+    ``patch`` replaces the corresponding value in ``base``.
+    """
+    if isinstance(base, dict) and isinstance(patch, dict):
+        merged = dict(base)
+        for key, value in patch.items():
+            if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
+                merged[key] = deep_merge(merged[key], value)
+            else:
+                merged[key] = value
+        return merged
+    return patch
 
 
 # ---------------------------------------------------------------------------

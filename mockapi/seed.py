@@ -295,6 +295,8 @@ def _seed_association_children(session: Session, association_id: int) -> None:
             "FirstName": f"AssocTenant{tid}",
             "LastName": "Smith",
             "Email": f"assoctenant{tid}@example.com",
+            "PhoneNumbers": [{"Number": f"555-03{tid:02d}", "Type": "Cell"}],
+            "PrimaryAddress": _addr(tid),
         },
         entity_id=tid,
         association_id=association_id,

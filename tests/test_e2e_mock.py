@@ -175,6 +175,40 @@ def test_list_result_has_timing_meta(tools, run):
     assert result["meta"]["attempts"] == 1
 
 
+def test_partial_rental_tenant_phone_update(tools, run):
+    """Updating only a phone number must not require the full tenant schema."""
+    before = _ok(run(tools["get_rental_tenant"].fn(tenant_id=1)))
+    assert before["data"]["FirstName"] == "Tenant1"
+
+    result = _ok(
+        run(
+            tools["update_rental_tenant"].fn(
+                tenant_id=1, tenant_data={"phone_numbers": {"mobile": "555-867-5309"}}
+            )
+        )
+    )
+    # Required fields were preserved from the existing record.
+    assert result["data"]["FirstName"] == "Tenant1"
+    assert result["data"]["LastName"] == "Doe"
+    # The mobile number is present after the update (list form in the response).
+    numbers = {p["Number"] for p in result["data"]["PhoneNumbers"]}
+    assert "555-867-5309" in numbers
+
+
+def test_partial_association_tenant_phone_update(tools, run):
+    """Association tenants support the same partial-update behavior."""
+    result = _ok(
+        run(
+            tools["update_association_tenant"].fn(
+                tenant_id=1, tenant_data={"phone_numbers": {"mobile": "555-101-2020"}}
+            )
+        )
+    )
+    assert result["data"]["FirstName"] == "AssocTenant1"
+    numbers = {p["Number"] for p in result["data"]["PhoneNumbers"]}
+    assert "555-101-2020" in numbers
+
+
 def test_readonly_policy_blocks_mutations_e2e(mock_server, event_loop):
     """A readonly GuardedMCP must not expose mutating tools, but reads still work."""
     from fastmcp import FastMCP
