@@ -39,6 +39,58 @@ client. A defense-in-depth check also runs at call time and returns a
 The effective policy is surfaced (without secrets) by the `health_check` tool
 under the `policy` key.
 
+## Per-user scoping with Entra App Roles
+
+The role and guardrails above are **process-wide** — they form the server-wide
+*ceiling* (the maximum grant). When the server authenticates callers with
+Microsoft Entra (see `BUILDIUM_ENTRA_*` in the README), you can additionally
+narrow the available tools **per authenticated user** based on the user's Entra
+**App Role**.
+
+### App-registration setup
+
+1. On the MCP API app registration, define **App Roles** (Entra ID → *App
+   registrations* → your API → *App roles*), for example `Buildium.ReadOnly`,
+   `Buildium.Operator`, `Buildium.Admin`.
+2. Assign users or security groups to those app roles under *Enterprise
+   applications* → your API → *Users and groups*.
+3. Entra then emits a `roles` claim in the access token containing the assigned
+   app-role values. (App Roles are preferred over group claims because they are
+   not subject to the Entra "groups overage" truncation.)
+
+### Mapping config
+
+Set `BUILDIUM_ENTRA_ROLE_POLICY_MAP` to a JSON object mapping each app-role
+value to one of the coarse roles `readonly`, `operator`, or `admin`:
+
+```
+BUILDIUM_ENTRA_ROLE_POLICY_MAP='{"Buildium.Admin":"admin","Buildium.Operator":"operator","Buildium.ReadOnly":"readonly"}'
+```
+
+Group object IDs from the token `groups` claim are also matched against the map
+keys, so existing security groups can be used as a fallback.
+
+### Semantics
+
+- The caller's effective policy is the **intersection** of the server-wide
+  policy and the policy implied by their mapped coarse role (server ceiling ∩
+  user grant). The server-wide guardrails can never be widened by a user's role.
+- If a caller matches **more than one** mapped role, the **most permissive**
+  (`admin` > `operator` > `readonly`) is used.
+- A caller who matches **no** mapped role/group is **denied all tools**
+  (deny-all fallback).
+- Scoping is only active when the map is configured **and** Entra auth is
+  enabled. Static-token / dev-bypass / stdio modes are unaffected.
+
+### Enforcement surfaces
+
+Per-user scoping is enforced at both surfaces, for visibility and hard denial:
+
+| Surface | Visibility | Call-time denial |
+| --- | --- | --- |
+| MCP `tools/list` / `tools/call` | Filtered by middleware | Rejected with a tool error |
+| `/chat` (server-side LLM) | Offered tool specs filtered | Tool runner refuses forbidden tools |
+
 ## Audit trail
 
 Every invocation — plus every policy denial and rate-limit rejection — emits a

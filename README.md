@@ -164,6 +164,20 @@ JWKS URI are derived from the tenant ID unless overridden with
 **Auth precedence:** Entra ID → static bearer token (`BUILDIUM_MCP_AUTH_TOKEN`,
 useful for local/dev) → none (stdio default).
 
+**Per-user tool scoping (Entra App Roles):** define **App Roles** on the API app
+registration (e.g. `Buildium.ReadOnly`, `Buildium.Operator`, `Buildium.Admin`),
+assign users/groups to them, and map each app-role value to a coarse role with
+`BUILDIUM_ENTRA_ROLE_POLICY_MAP`:
+
+```bash
+BUILDIUM_ENTRA_ROLE_POLICY_MAP='{"Buildium.Admin":"admin","Buildium.Operator":"operator","Buildium.ReadOnly":"readonly"}'
+```
+
+Each request's available tools are then narrowed to the caller's mapped role,
+intersected with the server-wide policy; callers matching no mapped role/group
+are denied all tools. Enforced for both `tools/list`/`tools/call` and `/chat`.
+See [`docs/security-and-audit.md`](docs/security-and-audit.md) for details.
+
 > **Trust boundary:** the upstream Buildium API key
 > (`BUILDIUM_CLIENT_ID` / `BUILDIUM_CLIENT_SECRET`) never leaves the server. Remote
 > clients authenticate only with Entra tokens and never see Buildium credentials.

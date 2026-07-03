@@ -165,3 +165,48 @@ def test_chat_auth_required_when_verifier_configured() -> None:
         assert await _authorized(make_request({}), cfg, verifier) is True
 
     asyncio.run(run())
+
+
+def test_authenticate_returns_verified_claims() -> None:
+    """_authenticate surfaces JWT claims (e.g. Entra App Roles) when valid."""
+    import asyncio
+
+    from starlette.requests import Request
+
+    from mcp_server_buildium.chat_endpoint import _authenticate
+
+    class Cfg:
+        dev_auth_bypass = False
+
+    class TokenObj:
+        claims = {"roles": ["Buildium.ReadOnly"], "sub": "u"}
+
+    class Verifier:
+        async def verify_token(self, token):
+            return TokenObj() if token == "good" else None
+
+    def make_request(headers: dict[str, str]) -> Request:
+        raw = [(k.lower().encode(), v.encode()) for k, v in headers.items()]
+        return Request({"type": "http", "headers": raw})
+
+    async def run():
+        cfg = Cfg()
+        verifier = Verifier()
+        scheme = "Bearer "
+        ok, claims = await _authenticate(
+            make_request({"Authorization": scheme + "good"}), cfg, verifier
+        )
+        assert ok is True
+        assert claims == {"roles": ["Buildium.ReadOnly"], "sub": "u"}
+        # Rejected token -> not authorized, empty claims.
+        ok, claims = await _authenticate(
+            make_request({"Authorization": scheme + "bad"}), cfg, verifier
+        )
+        assert ok is False
+        assert claims == {}
+        # Dev bypass / no verifier -> authorized with empty claims.
+        cfg.dev_auth_bypass = True
+        ok, claims = await _authenticate(make_request({}), cfg, verifier)
+        assert ok is True and claims == {}
+
+    asyncio.run(run())

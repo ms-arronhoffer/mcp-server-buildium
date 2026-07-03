@@ -56,3 +56,36 @@ def test_policy_from_config_allow_deny_lists() -> None:
     )
     assert policy.is_allowed("list_leases")
     assert not policy.is_allowed("create_lease")  # deny wins
+
+
+# --- Entra App Role → coarse role mapping (BUILDIUM_ENTRA_ROLE_POLICY_MAP) ----
+
+
+def test_role_policy_map_unset_returns_none() -> None:
+    cfg = _cfg()
+    assert cfg.get_entra_role_policy_map() is None
+
+
+def test_role_policy_map_parsed_and_normalized() -> None:
+    cfg = _cfg(
+        entra_role_policy_map='{"Buildium.Admin":"Admin","Buildium.ReadOnly":"readonly"}'
+    )
+    assert cfg.get_entra_role_policy_map() == {
+        "Buildium.Admin": "admin",
+        "Buildium.ReadOnly": "readonly",
+    }
+
+
+def test_role_policy_map_rejects_invalid_json() -> None:
+    with pytest.raises(ValueError, match="valid JSON object"):
+        _cfg(entra_role_policy_map="not-json")
+
+
+def test_role_policy_map_rejects_unknown_coarse_role() -> None:
+    with pytest.raises(ValueError, match="must be one of"):
+        _cfg(entra_role_policy_map='{"Buildium.Root":"root"}')
+
+
+def test_role_policy_map_rejects_non_object() -> None:
+    with pytest.raises(ValueError, match="non-empty JSON object"):
+        _cfg(entra_role_policy_map="[]")
