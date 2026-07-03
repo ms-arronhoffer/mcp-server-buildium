@@ -85,13 +85,22 @@ def register_task_tools(mcp: FastMCP, client: BuildiumClient) -> None:
     async def update_task_category(
         category_id: int, category_data: dict[str, Any]
     ) -> dict[str, Any]:
-        """Update a task category."""
-        message = c.build_model(
-            "task_category_put_message", "TaskCategoryPutMessage", category_data
-        )
-        return await c.execute(
-            "update_task_category",
-            lambda: client.tasks_api.external_api_task_categories_update_task_category(
+        """Update a task category, merging changes onto the current record.
+
+        ``category_data`` only needs the fields you want to change; the current
+        category is fetched first to supply required fields so partial edits
+        succeed without a full schema.
+        """
+
+        async def _do_update() -> Any:
+            api = client.tasks_api
+            current = await api.external_api_task_categories_get_task_category_by_id(
+                task_category_id=category_id
+            )
+            merged = c.merge_update(current, category_data)
+            message = c.build_model("task_category_put_message", "TaskCategoryPutMessage", merged)
+            return await api.external_api_task_categories_update_task_category(
                 task_category_id=category_id, task_category_put_message=message
-            ),
-        )
+            )
+
+        return await c.execute("update_task_category", _do_update)

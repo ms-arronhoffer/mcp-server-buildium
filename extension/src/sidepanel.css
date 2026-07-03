@@ -262,32 +262,6 @@ button.link {
   border-radius: 4px;
 }
 
-.msg.tool {
-  align-self: stretch;
-  background: var(--tool-bg);
-  border: 1px solid var(--tool-border);
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 12px;
-}
-
-.msg.tool .tool-name {
-  font-weight: 600;
-  color: var(--muted);
-  display: block;
-  margin-bottom: 4px;
-}
-
-.msg.tool details summary {
-  cursor: pointer;
-  color: var(--muted);
-}
-
-.msg.tool pre {
-  margin: 6px 0 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
 .empty {
   color: var(--muted);
   text-align: center;

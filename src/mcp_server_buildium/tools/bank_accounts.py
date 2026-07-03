@@ -62,16 +62,25 @@ def register_bank_account_tools(mcp: FastMCP, client: BuildiumClient) -> None:
     async def update_bank_account(
         bank_account_id: int, bank_account_data: dict[str, Any]
     ) -> dict[str, Any]:
-        """Update an existing bank account."""
-        message = c.build_model(
-            "bank_account_put_message", "BankAccountPutMessage", bank_account_data
-        )
-        return await c.execute(
-            "update_bank_account",
-            lambda: client.bank_accounts_api.external_api_bank_accounts_update_bank_account(
+        """Update an existing bank account, merging changes onto the current record.
+
+        ``bank_account_data`` only needs the fields you want to change; the
+        current bank account is fetched first to supply required fields so
+        partial edits succeed without a full schema.
+        """
+
+        async def _do_update() -> Any:
+            api = client.bank_accounts_api
+            current = await api.external_api_bank_accounts_get_bank_account(
+                bank_account_id=bank_account_id
+            )
+            merged = c.merge_update(current, bank_account_data)
+            message = c.build_model("bank_account_put_message", "BankAccountPutMessage", merged)
+            return await api.external_api_bank_accounts_update_bank_account(
                 bank_account_id=bank_account_id, bank_account_put_message=message
-            ),
-        )
+            )
+
+        return await c.execute("update_bank_account", _do_update)
 
     @mcp.tool()
     async def list_bank_account_transactions(

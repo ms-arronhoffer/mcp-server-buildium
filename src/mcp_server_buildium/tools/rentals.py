@@ -68,14 +68,24 @@ def register_rental_tools(mcp: FastMCP, client: BuildiumClient) -> None:
 
     @mcp.tool()
     async def update_rental(property_id: int, rental_data: dict[str, Any]) -> dict[str, Any]:
-        """Update an existing rental property."""
-        message = RentalPropertyPutMessage(**rental_data)
-        return await c.execute(
-            "update_rental",
-            lambda: client.rentals_api.external_api_rentals_update_rental_property(
+        """Update an existing rental property, merging changes onto the current record.
+
+        ``rental_data`` only needs the fields you want to change; the current
+        property is fetched first to supply required fields so partial edits
+        succeed without a full schema.
+        """
+
+        async def _do_update() -> Any:
+            current = await client.rentals_api.external_api_rentals_get_rental_by_id(
+                property_id=property_id
+            )
+            merged = c.merge_update(current, rental_data)
+            message = RentalPropertyPutMessage(**merged)
+            return await client.rentals_api.external_api_rentals_update_rental_property(
                 property_id=property_id, rental_property_put_message=message
-            ),
-        )
+            )
+
+        return await c.execute("update_rental", _do_update)
 
     @mcp.tool()
     async def list_unit_listings(limit: int = 100, offset: int = 0) -> dict[str, Any]:

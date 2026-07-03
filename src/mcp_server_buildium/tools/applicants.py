@@ -76,14 +76,27 @@ def register_applicant_tools(mcp: FastMCP, client: BuildiumClient) -> None:
 
     @mcp.tool()
     async def update_applicant(applicant_id: int, applicant_data: dict[str, Any]) -> dict[str, Any]:
-        """Update an existing applicant."""
-        message = c.build_model("applicant_put_message", "ApplicantPutMessage", applicant_data)
-        return await c.execute(
-            "update_applicant",
-            lambda: client.applicants_api.external_api_applicants_update_applicant(
+        """Update an existing applicant, merging changes onto the current record.
+
+        ``applicant_data`` only needs the fields you want to change; the current
+        applicant is fetched first to supply required fields so partial edits
+        succeed without a full schema. Keys may use JSON aliases or field names,
+        and phone numbers use the keyed object form, e.g.
+        ``{"phone_numbers": {"mobile": "555-555-5555"}}``.
+        """
+
+        async def _do_update() -> Any:
+            api = client.applicants_api
+            current = await api.external_api_applicants_get_applicant_by_id(
+                applicant_id=applicant_id
+            )
+            merged = c.merge_update(current, applicant_data, reshape_phones=True)
+            message = c.build_model("applicant_put_message", "ApplicantPutMessage", merged)
+            return await api.external_api_applicants_update_applicant(
                 applicant_id=applicant_id, applicant_put_message=message
-            ),
-        )
+            )
+
+        return await c.execute("update_applicant", _do_update)
 
     @mcp.tool()
     async def list_applicant_applications(applicant_id: int) -> dict[str, Any]:
@@ -113,18 +126,29 @@ def register_applicant_tools(mcp: FastMCP, client: BuildiumClient) -> None:
     async def update_application(
         applicant_id: int, application_id: int, application_data: dict[str, Any]
     ) -> dict[str, Any]:
-        """Update an application status."""
-        message = c.build_model(
-            "application_put_message", "ApplicationPutMessage", application_data
-        )
-        return await c.execute(
-            "update_application",
-            lambda: client.applicants_api.external_api_applicant_applications_update_application(
+        """Update an application status, merging changes onto the current record.
+
+        ``application_data`` only needs the fields you want to change; the
+        current application is fetched first to supply required fields so partial
+        edits succeed without a full schema.
+        """
+
+        async def _do_update() -> Any:
+            api = client.applicants_api
+            current = (
+                await api.external_api_applicant_applications_get_application_for_applicant_by_id(
+                    applicant_id=applicant_id, application_id=application_id
+                )
+            )
+            merged = c.merge_update(current, application_data)
+            message = c.build_model("application_put_message", "ApplicationPutMessage", merged)
+            return await api.external_api_applicant_applications_update_application(
                 applicant_id=applicant_id,
                 application_id=application_id,
                 application_put_message=message,
-            ),
-        )
+            )
+
+        return await c.execute("update_application", _do_update)
 
     @mcp.tool()
     async def list_applicant_groups(limit: int = 100, offset: int = 0) -> dict[str, Any]:
@@ -152,13 +176,24 @@ def register_applicant_tools(mcp: FastMCP, client: BuildiumClient) -> None:
 
     @mcp.tool()
     async def update_applicant_group(group_id: int, group_data: dict[str, Any]) -> dict[str, Any]:
-        """Update an applicant group."""
-        message = c.build_model(
-            "applicant_group_put_message", "ApplicantGroupPutMessage", group_data
-        )
-        return await c.execute(
-            "update_applicant_group",
-            lambda: client.applicants_api.external_api_applicant_groups_update_applicant_group(
+        """Update an applicant group, merging changes onto the current record.
+
+        ``group_data`` only needs the fields you want to change; the current
+        group is fetched first to supply required fields so partial edits
+        succeed without a full schema.
+        """
+
+        async def _do_update() -> Any:
+            api = client.applicants_api
+            current = await api.external_api_applicant_groups_get_applicant_group_by_id(
+                applicant_group_id=group_id
+            )
+            merged = c.merge_update(current, group_data)
+            message = c.build_model(
+                "applicant_group_put_message", "ApplicantGroupPutMessage", merged
+            )
+            return await api.external_api_applicant_groups_update_applicant_group(
                 applicant_group_id=group_id, applicant_group_put_message=message
-            ),
-        )
+            )
+
+        return await c.execute("update_applicant_group", _do_update)

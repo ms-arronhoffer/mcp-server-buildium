@@ -90,14 +90,22 @@ def register_lease_tools(mcp: FastMCP, client: BuildiumClient) -> None:
 
     @mcp.tool()
     async def update_lease(lease_id: int, lease_data: dict[str, Any]) -> dict[str, Any]:
-        """Update an existing lease."""
-        message = LeasePutMessage(**lease_data)
-        return await c.execute(
-            "update_lease",
-            lambda: client.leases_api.external_api_leases_update_lease(
+        """Update an existing lease, merging changes onto the current record.
+
+        ``lease_data`` only needs the fields you want to change; the current
+        lease is fetched first to supply required fields so partial edits succeed
+        without a full schema.
+        """
+
+        async def _do_update() -> Any:
+            current = await client.leases_api.external_api_leases_get_lease_by_id(lease_id=lease_id)
+            merged = c.merge_update(current, lease_data)
+            message = LeasePutMessage(**merged)
+            return await client.leases_api.external_api_leases_update_lease(
                 lease_id=lease_id, lease_put_message=message
-            ),
-        )
+            )
+
+        return await c.execute("update_lease", _do_update)
 
     @mcp.tool()
     async def list_lease_transactions(
