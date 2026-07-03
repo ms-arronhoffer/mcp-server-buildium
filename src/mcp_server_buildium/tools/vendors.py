@@ -9,7 +9,7 @@ from . import _common as c
 
 VENDOR_STATUSES = {"Active", "Inactive"}
 
-# Buildium GET returns the vendor's category as a lookup object (``{"Id", "Name"}``)
+# Buildium GET returns the vendor's category as a lookup object (``{"Id": 1, "Name": "..."}``)
 # and phone numbers as a list, but the create/update messages want ``CategoryId``
 # and a keyed ``PhoneNumbers`` object. These map the GET shape onto the POST/PUT
 # shape so a caller can reuse the record it just read (see _common.reshape_input).

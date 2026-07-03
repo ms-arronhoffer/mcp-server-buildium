@@ -350,7 +350,7 @@ def reshape_input(
     ``lookup_ids`` foreign-key lookup objects into their ``<Name>Id`` scalar.
     """
     if not isinstance(data, dict):
-        return data if isinstance(data, dict) else {}
+        return {}
     result = dict(data)
     if reshape_phones:
         for key in list(result):
