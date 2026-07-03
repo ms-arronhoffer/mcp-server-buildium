@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Buildium MCP Sidebar — Settings</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main class="wrap">
+      <h1>Buildium MCP Sidebar — Settings</h1>
+      <p class="hint">
+        Configure the MCP server endpoint and Microsoft Entra ID sign-in. The
+        Buildium API key stays on the server and is never entered here.
+      </p>
+
+      <form id="settings-form">
+        <fieldset>
+          <legend>MCP server</legend>
+          <label for="mcpServerUrl">Server URL (Streamable HTTP endpoint)</label>
+          <input id="mcpServerUrl" type="url" placeholder="https://host/mcp" required />
+        </fieldset>
+
+        <fieldset>
+          <legend>Microsoft Entra ID</legend>
+          <label for="entraTenantId">Tenant ID</label>
+          <input id="entraTenantId" type="text" placeholder="00000000-0000-0000-0000-000000000000" />
+
+          <label for="entraClientId">Client (application) ID — this extension's app registration</label>
+          <input id="entraClientId" type="text" placeholder="Application (client) ID" />
+
+          <label for="entraScopes">Scopes (space-separated)</label>
+          <input id="entraScopes" type="text" placeholder="api://<api-app-id>/MCP.Access" />
+
+          <p class="hint">
+            Redirect URI to register (SPA platform):
+            <code id="redirect-uri">(loading…)</code>
+          </p>
+        </fieldset>
+
+        <fieldset>
+          <legend>Language model</legend>
+          <label for="llmApiBase">API base URL (OpenAI-compatible)</label>
+          <input id="llmApiBase" type="url" placeholder="https://api.openai.com/v1" />
+
+          <label for="llmModel">Model</label>
+          <input id="llmModel" type="text" placeholder="gpt-4o-mini" />
+
+          <label for="llmApiKey">API key (optional if using an Entra-protected proxy)</label>
+          <input id="llmApiKey" type="password" placeholder="sk-…" autocomplete="off" />
+
+          <label for="systemPrompt">System prompt</label>
+          <textarea id="systemPrompt" rows="4"></textarea>
+        </fieldset>
+
+        <div class="row">
+          <button type="submit">Save</button>
+          <span id="status" class="status" aria-live="polite"></span>
+        </div>
+        <ul id="errors" class="errors"></ul>
+      </form>
+    </main>
+    <script type="module" src="options.js"></script>
+  </body>
+</html>

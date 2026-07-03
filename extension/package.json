@@ -1,0 +1,18 @@
+{
+  "name": "buildium-mcp-sidebar",
+  "version": "0.1.0",
+  "description": "Full-height side panel chat extension (Chrome/Firefox) that talks to the Buildium MCP server with Microsoft Entra ID authentication and LLM-driven tool use.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "build:chrome": "node scripts/build.mjs chrome",
+    "build:firefox": "node scripts/build.mjs firefox",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.6"
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Buildium MCP</title>
+    <link rel="stylesheet" href="sidepanel.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <div class="brand">
+          <span class="dot" id="conn-dot" title="Connection status"></span>
+          <span class="title">Buildium MCP</span>
+        </div>
+        <div class="actions">
+          <button id="signin-btn" class="link" type="button">Sign in</button>
+          <button id="settings-btn" class="link" type="button" title="Settings">⚙</button>
+        </div>
+      </header>
+
+      <div id="status-banner" class="banner hidden"></div>
+
+      <main id="messages" class="messages" aria-live="polite"></main>
+
+      <form id="composer" class="composer">
+        <textarea
+          id="input"
+          rows="1"
+          placeholder="Ask about properties, leases, tenants…"
+          autocomplete="off"
+        ></textarea>
+        <button id="send-btn" type="submit" title="Send">Send</button>
+      </form>
+    </div>
+    <script type="module" src="sidepanel.js"></script>
+  </body>
+</html>

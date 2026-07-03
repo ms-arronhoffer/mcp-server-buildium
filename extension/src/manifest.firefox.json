@@ -1,0 +1,22 @@
+{
+  "background": {
+    "scripts": ["src/background.js"],
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Open Buildium MCP Sidebar"
+  },
+  "sidebar_action": {
+    "default_title": "Buildium MCP",
+    "default_panel": "src/sidepanel.html",
+    "default_icon": {
+      "48": "icons/icon-48.png"
+    }
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "buildium-mcp-sidebar@example.com",
+      "strict_min_version": "115.0"
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Buildium MCP Sidebar",
+  "version": "0.1.0",
+  "description": "Chat side panel that connects to the Buildium MCP server with Microsoft Entra ID auth and LLM-driven tool use.",
+  "icons": {
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "permissions": ["storage", "identity"],
+  "options_ui": {
+    "page": "src/options.html",
+    "open_in_tab": true
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}
