@@ -177,6 +177,14 @@ Run the HTTP transport with Docker Compose:
 docker compose up --build mcp-server-http   # serves http://localhost:8000/mcp
 ```
 
+The `mcp-server-http` (and `mcp-server`) services load a local **`.env`** file if
+present (it is gitignored). Any `BUILDIUM_*` values there — Buildium credentials,
+Microsoft Entra ID (`BUILDIUM_ENTRA_*`), and the server-side LLM assistant
+(`BUILDIUM_LLM_*`) — are passed into the container, so `/chat` and Entra auth work
+without editing the compose file. When no `.env` is present the services fall back
+to the seeded mock API defaults. `BUILDIUM_HOST` is always forced to `0.0.0.0`
+inside the container regardless of any value in `.env`.
+
 ### Server-side LLM assistant (`/chat`)
 
 The HTTP transport also exposes a **server-side assistant** so provider API keys
@@ -225,8 +233,9 @@ BUILDIUM_DEV_AUTH_BYPASS=true
 This disables **all** authentication on `/mcp`, `/chat`, and `/capabilities`.
 It is intended only for local development and mock testing — **never enable it on
 a network-reachable or production deployment.** The `docker compose`
-`mcp-server-http` service enables it by default so the extension can connect to
-the seeded mock API out of the box.
+`mcp-server-http` service reads `BUILDIUM_DEV_AUTH_BYPASS` from your `.env`
+(defaulting to `false`), so set it to `true` there when you want to connect the
+extension to the seeded mock API without an Entra tenant or token.
 
 
 ## Usage

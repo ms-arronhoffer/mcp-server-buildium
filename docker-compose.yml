@@ -33,12 +33,18 @@ services:
     depends_on:
       mockapi:
         condition: service_healthy
+    # Load values from a local .env if present (gitignored). Anything defined
+    # there (credentials, categories, etc.) is passed into the container. The
+    # file is optional, so the mock defaults below still work without it.
+    env_file:
+      - path: .env
+        required: false
     environment:
-      # Point the server at the mock API service on the compose network.
-      # base_url must NOT include /v1 — the SDK appends it to each path.
-      BUILDIUM_BASE_URL: "http://mockapi:8080"
-      BUILDIUM_CLIENT_ID: "mock-client-id"
-      BUILDIUM_CLIENT_SECRET: "mock-client-secret"
+      # Fallbacks used only when the key is not already set in .env / the host
+      # env. base_url must NOT include /v1 — the SDK appends it to each path.
+      BUILDIUM_BASE_URL: "${BUILDIUM_BASE_URL:-http://mockapi:8080}"
+      BUILDIUM_CLIENT_ID: "${BUILDIUM_CLIENT_ID:-mock-client-id}"
+      BUILDIUM_CLIENT_SECRET: "${BUILDIUM_CLIENT_SECRET:-mock-client-secret}"
     stdin_open: true
     tty: true
 
@@ -58,33 +64,32 @@ services:
         condition: service_healthy
     ports:
       - "8000:8000"
+    # Load values from a local .env if present (gitignored). Anything defined
+    # there — Buildium credentials, Microsoft Entra ID (tenant/audience), and
+    # the server-side LLM assistant (BUILDIUM_LLM_*) — is passed into the
+    # container so /chat and Entra auth work without hardcoding here. The file
+    # is optional, so the mock defaults below still work without it.
+    env_file:
+      - path: .env
+        required: false
     environment:
-      BUILDIUM_BASE_URL: "http://mockapi:8080"
-      BUILDIUM_CLIENT_ID: "mock-client-id"
-      BUILDIUM_CLIENT_SECRET: "mock-client-secret"
-      # Serve Streamable HTTP on all interfaces.
-      BUILDIUM_TRANSPORT: "http"
+      # Container-specific value: always bind all interfaces inside the
+      # container regardless of any BUILDIUM_HOST in .env (which typically holds
+      # a LAN IP meant for running the server directly on the host).
       BUILDIUM_HOST: "0.0.0.0"
-      BUILDIUM_PORT: "8000"
-      BUILDIUM_MCP_PATH: "/mcp"
-      # Allow the browser extension origin(s). Replace with your extension ID,
-      # or use a dev/static token instead of Entra for local testing.
-      BUILDIUM_CORS_ALLOW_ORIGINS: "*"
+      # Fallbacks used only when the key is not already set in .env / host env.
+      BUILDIUM_BASE_URL: "${BUILDIUM_BASE_URL:-http://mockapi:8080}"
+      BUILDIUM_CLIENT_ID: "${BUILDIUM_CLIENT_ID:-mock-client-id}"
+      BUILDIUM_CLIENT_SECRET: "${BUILDIUM_CLIENT_SECRET:-mock-client-secret}"
+      BUILDIUM_TRANSPORT: "${BUILDIUM_TRANSPORT:-http}"
+      BUILDIUM_PORT: "${BUILDIUM_PORT:-8000}"
+      BUILDIUM_MCP_PATH: "${BUILDIUM_MCP_PATH:-/mcp}"
+      # Allow the browser extension origin(s). Replace with your extension ID.
+      BUILDIUM_CORS_ALLOW_ORIGINS: "${BUILDIUM_CORS_ALLOW_ORIGINS:-*}"
       # Dev auth bypass: skip ALL auth so the extension can hit /mcp and /chat
-      # without an Entra tenant/token. NON-PRODUCTION ONLY.
-      BUILDIUM_DEV_AUTH_BYPASS: "true"
-      # --- Server-side LLM assistant (keys stay server-side) ----------------
-      # Uncomment a provider + its key to enable the /chat + /capabilities
-      # endpoints. Keys are read here (from host env or a secrets file) and are
-      # never sent to the browser extension.
-      # BUILDIUM_LLM_PROVIDER: "openai"
-      # BUILDIUM_LLM_MODEL: "gpt-4o-mini"
-      # BUILDIUM_LLM_ALLOWED_MODELS: "gpt-4o-mini,gpt-4o"
-      # BUILDIUM_LLM_OPENAI_API_KEY: "${BUILDIUM_LLM_OPENAI_API_KEY}"
-      # BUILDIUM_LLM_ANTHROPIC_API_KEY: "${BUILDIUM_LLM_ANTHROPIC_API_KEY}"
-      # BUILDIUM_LLM_GEMINI_API_KEY: "${BUILDIUM_LLM_GEMINI_API_KEY}"
-      # Microsoft Entra ID JWT auth (uncomment and fill in for real auth;
-      # remove BUILDIUM_DEV_AUTH_BYPASS above when enabling this):
-      # BUILDIUM_ENTRA_TENANT_ID: "00000000-0000-0000-0000-000000000000"
-      # BUILDIUM_ENTRA_AUDIENCE: "api://<api-app-client-id>"
-      # BUILDIUM_ENTRA_REQUIRED_SCOPES: "MCP.Access"
+      # without an Entra tenant/token. Defaults to false so that a configured
+      # Entra tenant/audience in .env actually takes effect. NON-PRODUCTION ONLY.
+      BUILDIUM_DEV_AUTH_BYPASS: "${BUILDIUM_DEV_AUTH_BYPASS:-false}"
+      # The server-side LLM assistant (BUILDIUM_LLM_PROVIDER / _MODEL /
+      # _*_API_KEY) and Entra auth (BUILDIUM_ENTRA_*) are supplied via the .env
+      # file above; keys are read here and never sent to the browser extension.

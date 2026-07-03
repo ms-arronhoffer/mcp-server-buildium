@@ -119,7 +119,7 @@ export class McpClient {
       jsonRpcRequest(this._nextId(), "initialize", {
         protocolVersion: PROTOCOL_VERSION,
         capabilities: {},
-        clientInfo: { name: "buildium-mcp-sidebar", version: "0.1.0" },
+        clientInfo: { name: "portfolio-desk-ai-assistant", version: "0.1.0" },
       }),
     );
     // Complete the handshake with the required notification.
