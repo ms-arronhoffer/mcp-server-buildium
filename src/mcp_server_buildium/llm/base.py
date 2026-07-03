@@ -34,6 +34,10 @@ class ToolCall:
     id: str
     name: str
     arguments: dict[str, Any] = field(default_factory=dict)
+    #: Opaque provider metadata that must be echoed back verbatim on the next
+    #: request (e.g. Gemini's ``thoughtSignature``). ``None`` for providers that
+    #: do not use it.
+    thought_signature: str | None = None
 
 
 @dataclass
