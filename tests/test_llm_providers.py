@@ -171,6 +171,37 @@ def test_gemini_tools_shape() -> None:
     assert gemini_tools([]) == []
 
 
+def test_gemini_tools_strips_unsupported_schema_keys() -> None:
+    tools = [
+        {
+            "name": "make_thing",
+            "description": "Make a thing",
+            "inputSchema": {
+                "type": "object",
+                "additionalProperties": False,
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "properties": {
+                    "opts": {
+                        "type": "object",
+                        "additionalProperties": {"type": "string"},
+                        "properties": {"name": {"type": "string"}},
+                    }
+                },
+            },
+        }
+    ]
+    params = gemini_tools(tools)[0]["function_declarations"][0]["parameters"]
+    assert params == {
+        "type": "object",
+        "properties": {
+            "opts": {
+                "type": "object",
+                "properties": {"name": {"type": "string"}},
+            }
+        },
+    }
+
+
 def test_gemini_contents_split_system_and_parts() -> None:
     system, contents = gemini_contents(CONVERSATION)
     assert system == {"parts": [{"text": "sys"}]}

@@ -233,6 +233,41 @@ class AnthropicProvider(LLMProvider):
 # ---------------------------------------------------------------------------
 
 
+# JSON-Schema keywords that Gemini's OpenAPI-subset schema does not accept and
+# which cause a 400 ("Unknown name ... Cannot find field") if sent. They are
+# stripped recursively from tool parameter schemas before the request.
+_GEMINI_UNSUPPORTED_SCHEMA_KEYS = frozenset(
+    {
+        "additionalProperties",
+        "$schema",
+        "$id",
+        "$ref",
+        "$defs",
+        "definitions",
+        "patternProperties",
+        "unevaluatedProperties",
+    }
+)
+
+
+def _sanitize_gemini_schema(schema: Any) -> Any:
+    """Recursively strip JSON-Schema keywords Gemini rejects. Pure.
+
+    Gemini's ``function_declarations`` accept only an OpenAPI 3 subset, so
+    keywords such as ``additionalProperties`` must be removed from the schema
+    (at every nesting level) or the API returns a 400.
+    """
+    if isinstance(schema, dict):
+        return {
+            key: _sanitize_gemini_schema(value)
+            for key, value in schema.items()
+            if key not in _GEMINI_UNSUPPORTED_SCHEMA_KEYS
+        }
+    if isinstance(schema, list):
+        return [_sanitize_gemini_schema(item) for item in schema]
+    return schema
+
+
 def gemini_tools(tools: list[ToolSpec]) -> list[dict[str, Any]]:
     """Map MCP tools to a single Gemini ``function_declarations`` tool. Pure."""
     if not tools:
@@ -243,7 +278,9 @@ def gemini_tools(tools: list[ToolSpec]) -> list[dict[str, Any]]:
                 {
                     "name": t["name"],
                     "description": t.get("description") or "",
-                    "parameters": t.get("inputSchema") or {"type": "object", "properties": {}},
+                    "parameters": _sanitize_gemini_schema(
+                        t.get("inputSchema") or {"type": "object", "properties": {}}
+                    ),
                 }
                 for t in tools
             ]
