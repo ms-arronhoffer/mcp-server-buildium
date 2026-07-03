@@ -76,29 +76,6 @@ function renderAssistantMarkdown(el, text) {
   els.messages.scrollTop = els.messages.scrollHeight;
 }
 
-function addToolMessage(name, argsOrResult, { result = false } = {}) {
-  clearEmptyState();
-  const div = document.createElement("div");
-  div.className = "msg tool";
-  const label = document.createElement("span");
-  label.className = "tool-name";
-  label.textContent = result ? `🛠 ${name} → result` : `🛠 calling ${name}`;
-  div.appendChild(label);
-
-  const details = document.createElement("details");
-  const summary = document.createElement("summary");
-  summary.textContent = result ? "Show result" : "Show arguments";
-  const pre = document.createElement("pre");
-  pre.textContent =
-    typeof argsOrResult === "string" ? argsOrResult : JSON.stringify(argsOrResult, null, 2);
-  details.appendChild(summary);
-  details.appendChild(pre);
-  div.appendChild(details);
-
-  els.messages.appendChild(div);
-  els.messages.scrollTop = els.messages.scrollHeight;
-}
-
 async function refreshSignInState() {
   const signedIn = await isSignedIn();
   els.signin.textContent = signedIn ? "Sign out" : "Sign in";
@@ -138,8 +115,6 @@ async function handleSend(text) {
         assistantEl.textContent = streamed;
         els.messages.scrollTop = els.messages.scrollHeight;
       },
-      onToolCall: (name, args) => addToolMessage(name, args),
-      onToolResult: (name, resultText) => addToolMessage(name, resultText, { result: true }),
     });
     const finalText = content || streamed;
     if (finalText) {
