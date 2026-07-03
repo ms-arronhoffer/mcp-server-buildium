@@ -242,6 +242,37 @@ extension can populate a model dropdown. **No endpoint ever emits key material.*
 > removed. Provider keys now live only in server config/secrets; the extension no
 > longer stores an LLM API base, key, or free-text model.
 
+#### Upload a document to create records
+
+The assistant can read an **attached document** and use it to create Buildium
+records. In the extension side panel, use the 📎 attach button to add a file to a
+chat message (for example, a lease PDF). The assistant then:
+
+1. Identifies the target object type and extracts the relevant fields, using the
+   read-only `describe_create_schema` helper as a checklist of what each
+   `create_*` tool needs.
+2. Looks up referenced entities (tenant, rental owner, property, unit, vendor)
+   with the existing `list_*`/`get_*` tools. If one doesn't exist, it asks you
+   whether to create it first — **new dependent entities always require explicit
+   confirmation** — and threads the returned Id into the parent object.
+3. Presents the extracted fields back as a summary, asks follow-up questions to
+   fill gaps, and only writes after you confirm.
+4. Optionally saves the uploaded file to Buildium (via `save_uploaded_document`)
+   and links it to the created record.
+
+Supported file types: **PDF, DOCX, PNG, JPEG, WebP, and plain/CSV/Markdown
+text**. The default per-file cap is **10 MB** with up to **5 files per request**;
+tune these with:
+
+```bash
+BUILDIUM_LLM_MAX_ATTACHMENT_MB=10          # per-file size cap (MB)
+BUILDIUM_LLM_MAX_ATTACHMENTS_PER_REQUEST=5 # files per chat turn
+```
+
+Native multimodal support varies by provider: images and PDFs are sent inline to
+providers that accept them, and the server falls back to extracting text (PDF,
+DOCX, and text formats) when a provider can't take a document natively.
+
 ### Dev auth bypass (local/mock testing)
 
 To run the HTTP transport locally against the mock API **without** an Entra

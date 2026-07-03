@@ -67,6 +67,19 @@ describe("ChatClient", () => {
     vi.unstubAllGlobals();
   });
 
+  it("forwards message attachments in the request body", async () => {
+    const fetchMock = vi.fn(async () => streamResponse('data: {"type":"done","content":"ok"}\n'));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const attachments = [{ name: "lease.pdf", media_type: "application/pdf", data: "JVBERg==" }];
+    const chat = new ChatClient(config, async () => "t");
+    await chat.run([{ role: "user", content: "extract", attachments }]);
+
+    const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(sent.messages[0].attachments).toEqual(attachments);
+    vi.unstubAllGlobals();
+  });
+
   it("streams tokens and returns the final content", async () => {
     const sse =
       'data: {"type":"token","text":"Hello "}\n' +

@@ -241,3 +241,84 @@ def test_chat_system_prompt_includes_current_datetime(client, monkeypatch) -> No
     system = captured["messages"][0]
     assert system["role"] == "system"
     assert "current date and time is" in system["content"].lower()
+
+
+def test_chat_rejects_oversize_attachment(client) -> None:
+    """An attachment exceeding the size cap is rejected with a 400."""
+    import base64
+
+    big = base64.b64encode(b"x" * (11 * 1024 * 1024)).decode("ascii")
+    resp = client.post(
+        "/chat",
+        json={
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "save this",
+                    "attachments": [
+                        {"name": "big.txt", "media_type": "text/plain", "data": big}
+                    ],
+                }
+            ]
+        },
+    )
+    assert resp.status_code == 400
+    assert "too large" in resp.json()["error"].lower()
+
+
+def test_chat_rejects_unsupported_attachment_type(client) -> None:
+    import base64
+
+    data = base64.b64encode(b"nope").decode("ascii")
+    resp = client.post(
+        "/chat",
+        json={
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "hi",
+                    "attachments": [
+                        {"name": "a.exe", "media_type": "application/octet-stream", "data": data}
+                    ],
+                }
+            ]
+        },
+    )
+    assert resp.status_code == 400
+
+
+def test_chat_threads_attachments_to_provider(client, monkeypatch) -> None:
+    """A valid attachment is decoded and passed to the provider on the user turn."""
+    import base64
+
+    captured: dict = {}
+
+    class StubProvider:
+        def __init__(self, *a, **k) -> None:
+            pass
+
+        async def complete(self, messages, tools):
+            captured["messages"] = messages
+            return Completion(content="Read it.")
+
+    monkeypatch.setattr(chat_endpoint, "build_provider", lambda *a, **k: StubProvider())
+
+    data = base64.b64encode(b"lease terms").decode("ascii")
+    resp = client.post(
+        "/chat",
+        json={
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "extract",
+                    "attachments": [
+                        {"name": "lease.txt", "media_type": "text/plain", "data": data}
+                    ],
+                }
+            ]
+        },
+    )
+    assert resp.status_code == 200
+    user_msg = next(m for m in captured["messages"] if m["role"] == "user")
+    assert user_msg["attachments"][0].name == "lease.txt"
+    assert user_msg["attachments"][0].data == b"lease terms"

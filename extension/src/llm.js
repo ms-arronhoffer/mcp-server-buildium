@@ -59,7 +59,11 @@ export class ChatClient {
 
   /**
    * Run one user turn against the server assistant, streaming events back.
-   * @param {Array<{role:string, content:string}>} history  user/assistant turns
+   *
+   * `history` messages may carry an `attachments` array on the latest user
+   * turn (`[{ name, media_type, data }]`, where `data` is base64), which the
+   * server reads to extract fields from an uploaded document.
+   * @param {Array<{role:string, content:string, attachments?:Array<object>}>} history
    * @param {{onToken?:(t:string)=>void,
    *          onToolCall?:(name:string, args:object)=>void,
    *          onToolResult?:(name:string, text:string)=>void}} [callbacks]
