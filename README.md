@@ -118,7 +118,8 @@ BUILDIUM_CORS_ALLOW_ORIGINS=chrome-extension://<extension-id>,moz-extension://<e
 ```
 
 When `BUILDIUM_ENTRA_TENANT_ID` and `BUILDIUM_ENTRA_AUDIENCE` are set, every MCP
-request must carry a valid `Authorization: ****** Entra access token.
+request must carry a valid Entra access token in the `Authorization` header
+(using the `Bearer` scheme).
 The server verifies the token's **signature** (against Entra's rotating JWKS),
 **issuer**, **audience**, **expiry**, and any **required scopes**. The issuer and
 JWKS URI are derived from the tenant ID unless overridden with

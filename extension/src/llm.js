@@ -93,7 +93,7 @@ export function parseChatSseLine(line) {
   const trimmed = line.trimStart();
   if (!trimmed.startsWith("data:")) return null;
   const payload = trimmed.slice("data:".length).trim();
-  if (payload === "" ) return null;
+  if (payload === "") return null;
   if (payload === "[DONE]") return "[DONE]";
   const json = JSON.parse(payload);
   return json.choices?.[0]?.delta ?? {};
