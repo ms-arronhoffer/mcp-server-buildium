@@ -15,7 +15,15 @@ from typing import TYPE_CHECKING, Any
 from starlette.requests import Request
 from starlette.responses import JSONResponse, StreamingResponse
 
-from .llm import build_provider, flatten_tool_result, run_chat
+from .llm import (
+    build_provider,
+    flatten_tool_result,
+    mb_to_bytes,
+    normalize_attachments,
+    run_chat,
+    set_current_attachments,
+)
+from .llm.attachments import Attachment, AttachmentError, current_attachments
 from .logging_config import get_logger
 from .security.policy import effective_policy_for_claims
 
@@ -170,12 +178,30 @@ def register_chat_routes(
             config.get_llm_system_prompt() + "\n\n" + _current_datetime_note()
         )
         messages: list[dict[str, Any]] = [{"role": "system", "content": system_content}]
+        # Attachments on the most recent user message are decoded/validated and
+        # threaded to the model as multimodal content; they are also published to
+        # the tool context so a tool can save the raw bytes to Buildium.
+        latest_attachments: list[Attachment] = []
+        max_bytes = mb_to_bytes(config.llm_max_attachment_mb)
+        max_count = config.llm_max_attachments_per_request
         for m in history:
             if not isinstance(m, dict):
                 continue
             role = m.get("role")
-            if role in ("user", "assistant"):
-                messages.append({"role": role, "content": m.get("content") or ""})
+            if role not in ("user", "assistant"):
+                continue
+            message: dict[str, Any] = {"role": role, "content": m.get("content") or ""}
+            if role == "user" and m.get("attachments"):
+                try:
+                    atts = normalize_attachments(
+                        m["attachments"], max_bytes=max_bytes, max_count=max_count
+                    )
+                except AttachmentError as exc:
+                    return JSONResponse({"error": str(exc)}, status_code=400)
+                if atts:
+                    message["attachments"] = atts
+                    latest_attachments = atts
+            messages.append(message)
 
         # Resolve the caller's effective policy (server ceiling ∩ Entra App Role).
         effective = (
@@ -213,6 +239,9 @@ def register_chat_routes(
         provider = build_provider(config, model=requested_model)
 
         async def event_stream():
+            # Publish this request's attachments so in-process tools (e.g.
+            # save_uploaded_document) can access the raw bytes by file name.
+            token = set_current_attachments(latest_attachments)
             try:
                 async for event in run_chat(
                     provider,
@@ -229,6 +258,8 @@ def register_chat_routes(
             except Exception as exc:  # pragma: no cover - defensive
                 logger.exception("chat stream failed")
                 yield _sse({"type": "error", "message": str(exc)})
+            finally:
+                current_attachments.reset(token)
 
         return StreamingResponse(
             event_stream(),

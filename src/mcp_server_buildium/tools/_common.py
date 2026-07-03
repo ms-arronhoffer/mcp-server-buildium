@@ -136,6 +136,24 @@ def register_operation(tool_name: str, operation_id: str) -> None:
     }
 
 
+def register_local_tool(
+    tool_name: str, *, op_type: str | None = None, sensitive: bool | None = None
+) -> None:
+    """Classify a server-local tool that has no Buildium OpenAPI operation.
+
+    Local helper tools (e.g. document-intake helpers) are not backed by a
+    Buildium API operation, so they must not appear in :data:`TOOL_OPERATIONS`
+    (which is validated against the OpenAPI spec). This records only their
+    read/write and sensitivity classification in :data:`TOOL_METADATA` so the
+    security policy and audit layers treat them correctly. Values default to the
+    name-based classification when not given explicitly.
+    """
+    TOOL_METADATA[tool_name] = {
+        "op_type": op_type if op_type is not None else classify_op_type(tool_name),
+        "sensitive": sensitive if sensitive is not None else classify_sensitive(tool_name),
+    }
+
+
 def _humanize_tool_name(tool_name: str | None) -> str:
     """Turn a tool name like ``create_rental`` into ``create rental`` for messages."""
     if not tool_name:

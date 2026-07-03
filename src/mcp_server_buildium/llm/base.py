@@ -19,8 +19,14 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 # A single chat message in the neutral internal format.
 #   {"role": "system"|"user", "content": str}
+#   {"role": "user", "content": str, "attachments"?: list[Attachment]}
 #   {"role": "assistant", "content": str | None, "tool_calls": list[ToolCall]}
 #   {"role": "tool", "tool_call_id": str, "name": str, "content": str}
+#
+# ``attachments`` (optional, user messages only) carries uploaded documents the
+# assistant should read to extract fields. Each entry is an
+# :class:`mcp_server_buildium.llm.attachments.Attachment`; provider adapters map
+# them to their native multimodal content blocks (or a text fallback).
 Message = dict[str, Any]
 
 # An MCP tool advertised to the model: {"name", "description", "inputSchema"}.

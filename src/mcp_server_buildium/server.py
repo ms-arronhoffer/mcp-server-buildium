@@ -18,6 +18,7 @@ from .tools.applicants import register_applicant_tools
 from .tools.associations import register_association_tools
 from .tools.bank_accounts import register_bank_account_tools
 from .tools.bills import register_bill_tools
+from .tools.documents import register_document_tools
 from .tools.files import register_file_tools
 from .tools.general_ledger import register_general_ledger_tools
 from .tools.leases import register_lease_tools
@@ -84,6 +85,7 @@ _CATEGORY_REGISTRARS = {
     "bank_accounts": register_bank_account_tools,
     "general_ledger": register_general_ledger_tools,
     "work_orders": register_work_order_tools,
+    "documents": register_document_tools,
 }
 
 for _category, _register in _CATEGORY_REGISTRARS.items():
