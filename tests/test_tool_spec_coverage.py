@@ -56,8 +56,8 @@ def tool_operations(server_module) -> dict[str, str]:  # noqa: ANN001
 
 @pytest.fixture(scope="module")
 def registered_tool_names(server_module) -> list[str]:  # noqa: ANN001
-    tools = asyncio.run(server_module.mcp.list_tools())
-    return [t.name for t in tools]
+    tools = asyncio.run(server_module.mcp.get_tools())
+    return [t.name for t in tools.values()]
 
 
 def test_every_mapped_tool_targets_a_real_operation(

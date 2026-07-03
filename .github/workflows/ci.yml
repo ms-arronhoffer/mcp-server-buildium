@@ -32,7 +32,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv pip install -e ".[dev]"
+          uv pip install -e ".[dev,mockapi]"
 
       - name: Run ruff linter
         run: |
@@ -42,11 +42,13 @@ jobs:
         run: |
           uv run ruff format --check .
 
-      - name: Run unit tests with pytest
-        continue-on-error: true
+      - name: Validate tool coverage against OpenAPI spec
         run: |
-          # No unit tests currently (only integration tests)
-          echo "Skipping unit tests - only integration tests exist"
+          uv run pytest tests/test_tool_spec_coverage.py -v
+
+      - name: Run unit and end-to-end tests
+        run: |
+          uv run pytest tests/ --ignore=tests/test_integration.py -v
 
       - name: Run integration tests (if secrets available)
         if: env.BUILDIUM_CLIENT_ID != ''

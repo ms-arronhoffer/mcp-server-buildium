@@ -113,7 +113,7 @@ def tools(mock_server: str, event_loop):
     mcp = FastMCP("e2e")
     for register in _CATEGORY_REGISTRARS.values():
         register(mcp, client)
-    tool_map = {t.name: t for t in event_loop.run_until_complete(mcp.list_tools())}
+    tool_map = {t.name: t for t in event_loop.run_until_complete(mcp.get_tools()).values()}
     return tool_map
 
 

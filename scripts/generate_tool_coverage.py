@@ -65,8 +65,8 @@ def load_tool_mappings() -> tuple[list[str], dict[str, str]]:
     from mcp_server_buildium import server
     from mcp_server_buildium.tools import _common
 
-    tools = asyncio.run(server.mcp.list_tools())
-    tool_names = sorted(t.name for t in tools)
+    tools = asyncio.run(server.mcp.get_tools())
+    tool_names = sorted(t.name for t in tools.values())
     return tool_names, dict(_common.TOOL_OPERATIONS)
 
 
@@ -97,7 +97,9 @@ def build_report(
     lines.append(f"- Mappings valid (operation exists in spec): **{ok}**")
     lines.append(f"- Mappings invalid (operation missing): **{missing}**")
     lines.append(f"- Total operations in spec: **{len(spec_operations)}**")
-    lines.append(f"- Spec operations covered by a tool: **{len(covered_ops & set(spec_operations))}**")
+    lines.append(
+        f"- Spec operations covered by a tool: **{len(covered_ops & set(spec_operations))}**"
+    )
     lines.append("")
 
     lines.append("## Tool → Operation mapping")
@@ -162,8 +164,7 @@ def main() -> int:
                 print(f"  {tool} -> {op}", file=sys.stderr)
         if stale:
             print(
-                "docs/tool-coverage.md is stale. Run "
-                "`python scripts/generate_tool_coverage.py`.",
+                "docs/tool-coverage.md is stale. Run `python scripts/generate_tool_coverage.py`.",
                 file=sys.stderr,
             )
         return 1 if (invalid or stale) else 0
