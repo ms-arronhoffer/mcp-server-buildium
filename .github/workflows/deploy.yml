@@ -43,8 +43,26 @@ jobs:
 
       # (Re)build and start the HTTP MCP server via Docker Compose. Credentials
       # and Entra/LLM settings are provided by a gitignored .env on the runner.
+      #
+      # The build can intermittently fail on the long-lived self-hosted runner
+      # with a BuildKit/containerd error such as:
+      #   failed to prepare extraction snapshot ...: parent snapshot ... does
+      #   not exist: not found
+      # This happens when the runner's build/image cache references a layer
+      # snapshot that has since been garbage-collected, leaving the store in an
+      # inconsistent state. A normal cached build keeps deploys fast, so only
+      # fall back to pruning the stale cache and doing a clean rebuild when the
+      # first attempt hits this corruption.
       - name: Build server image
-        run: docker compose build mcp-server-http
+        run: |
+          set -euo pipefail
+          if ! docker compose build mcp-server-http; then
+            echo "::warning::Build failed (likely corrupt BuildKit/containerd cache); pruning and retrying with --no-cache"
+            docker compose down --remove-orphans || true
+            docker image rm -f mcp-server-buildium:latest || true
+            docker builder prune --all --force || true
+            docker compose build --no-cache mcp-server-http
+          fi
 
       - name: Deploy server
         run: docker compose up -d mcp-server-http
