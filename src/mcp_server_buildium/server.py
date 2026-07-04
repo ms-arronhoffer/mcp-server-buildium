@@ -154,28 +154,46 @@ async def health_check() -> dict[str, Any]:
 
 
 def _build_cors_middleware() -> list:
-    """Build CORS middleware for the HTTP transport from configuration.
+    """Build the HTTP middleware stack for the HTTP transport.
 
-    Returns an empty list when no origins are configured so the server does not
-    emit CORS headers by default.
+    Always includes a middleware that sets conservative security response
+    headers. CORS middleware is added only when origins are configured, so the
+    server does not emit CORS headers by default.
     """
-    origins = config.get_cors_origins()
-    if not origins:
-        return []
-
     from starlette.middleware import Middleware
-    from starlette.middleware.cors import CORSMiddleware
+    from starlette.middleware.base import BaseHTTPMiddleware
 
-    return [
-        Middleware(
-            CORSMiddleware,
-            allow_origins=origins,
-            allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
-            allow_headers=["Authorization", "Content-Type", "Mcp-Session-Id"],
-            expose_headers=["Mcp-Session-Id"],
-            allow_credentials="*" not in origins,
+    class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
+        """Add hardening headers to every HTTP response."""
+
+        async def dispatch(self, request, call_next):  # noqa: ANN001
+            response = await call_next(request)
+            response.headers.setdefault("X-Content-Type-Options", "nosniff")
+            response.headers.setdefault("X-Frame-Options", "DENY")
+            response.headers.setdefault("Referrer-Policy", "no-referrer")
+            response.headers.setdefault(
+                "Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'"
+            )
+            return response
+
+    middleware = [Middleware(_SecurityHeadersMiddleware)]
+
+    origins = config.get_cors_origins()
+    if origins:
+        from starlette.middleware.cors import CORSMiddleware
+
+        middleware.append(
+            Middleware(
+                CORSMiddleware,
+                allow_origins=origins,
+                allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+                allow_headers=["Authorization", "Content-Type", "Mcp-Session-Id"],
+                expose_headers=["Mcp-Session-Id"],
+                allow_credentials="*" not in origins,
+            )
         )
-    ]
+
+    return middleware
 
 
 @mcp.tool()

@@ -44,6 +44,12 @@ ALLOWED_MEDIA_TYPES = frozenset(
 # One megabyte in bytes; size caps are expressed in MB in configuration.
 _BYTES_PER_MB = 1024 * 1024
 
+# Upper bound on the *decompressed* size of an entry read out of a DOCX (ZIP)
+# container. A DOCX is a ZIP archive, and ``zipfile`` decompresses on read with
+# no size limit, so a small "zip bomb" could otherwise expand to gigabytes and
+# exhaust memory (CWE-409). We refuse to read entries larger than this.
+_MAX_DOCX_ENTRY_BYTES = 50 * _BYTES_PER_MB
+
 
 class AttachmentError(ValueError):
     """Raised when a client-supplied attachment is malformed or not permitted."""
@@ -182,7 +188,19 @@ def _extract_docx_text(data: bytes) -> str | None:
 
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as zf:
-            xml = zf.read("word/document.xml").decode("utf-8", errors="replace")
+            try:
+                info = zf.getinfo("word/document.xml")
+            except KeyError:
+                return None
+            # Guard against decompression bombs: reject entries whose declared
+            # uncompressed size exceeds our cap before decompressing them.
+            if info.file_size > _MAX_DOCX_ENTRY_BYTES:
+                return None
+            with zf.open(info) as fh:
+                raw = fh.read(_MAX_DOCX_ENTRY_BYTES + 1)
+            if len(raw) > _MAX_DOCX_ENTRY_BYTES:
+                return None
+            xml = raw.decode("utf-8", errors="replace")
     except (zipfile.BadZipFile, KeyError, OSError):
         return None
     # Convert paragraph and break boundaries to newlines before stripping tags so
