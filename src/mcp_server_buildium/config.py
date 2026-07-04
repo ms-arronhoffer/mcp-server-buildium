@@ -47,6 +47,7 @@ ALL_CATEGORIES = frozenset(
         "reports",
         "close",
         "alerts",
+        "analytics",
     }
 )
 

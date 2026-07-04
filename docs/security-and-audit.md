@@ -37,7 +37,10 @@ client. A defense-in-depth check also runs at call time and returns a
 `forbidden` error envelope if a disabled tool is somehow invoked.
 
 The effective policy is surfaced (without secrets) by the `health_check` tool
-under the `policy` key.
+under the `policy` key. `health_check` is always registered and does not
+require a Buildium API call, so you can inspect the active configuration at any
+time — including which roles, guardrails, allow/deny lists, and rate limits are
+in force — without needing real credentials.
 
 ## Per-user scoping with Entra App Roles
 
@@ -106,7 +109,9 @@ Select a sink with `BUILDIUM_AUDIT_SINK`:
 
 ### Reporting
 
-With the `file` sink you can summarize activity:
+With the `file` sink you can summarize activity two ways:
+
+**Command-line report** (offline, from the log file):
 
 ```bash
 # Markdown report to stdout
@@ -121,8 +126,10 @@ The report includes counts by tool/outcome/operation type, the overall error
 rate, recent mutations, and recent denied/rate-limited (security-relevant)
 attempts.
 
-The admin-only `audit_summary` tool returns the same aggregates over MCP when
-the `file` sink is configured.
+**`audit_summary` tool** (live, over MCP, admin-only): the built-in
+`audit_summary` tool returns the same aggregates directly in an MCP tool call
+when the `file` sink is configured. No file access is required — any admin
+client connected to the server can query it on demand.
 
 ## Response envelope
 
@@ -144,6 +151,14 @@ and an optional actionable `hint`.
 
 ## Tuning
 
-Retry and pagination limits are configurable via environment
-variables: `BUILDIUM_MAX_RETRIES`,
-`BUILDIUM_MAX_PAGE_LIMIT`, and `BUILDIUM_DEFAULT_PAGE_LIMIT`.
+Retry, pagination, and auto-pagination limits are configurable via environment
+variables:
+
+| Env var | Default | Effect |
+|---------|---------|--------|
+| `BUILDIUM_MAX_RETRIES` | `3` | Maximum retry attempts per transient failure |
+| `BUILDIUM_BASE_BACKOFF_SECONDS` | `0.5` | Base delay for the first retry |
+| `BUILDIUM_MAX_BACKOFF_SECONDS` | `8.0` | Maximum per-retry delay |
+| `BUILDIUM_MAX_PAGE_LIMIT` | `1000` | Maximum page size for list endpoints |
+| `BUILDIUM_DEFAULT_PAGE_LIMIT` | `100` | Default page size when not specified |
+| `BUILDIUM_MAX_FETCH_ALL_RECORDS` | `5000` | Record ceiling for auto-paginating tools (reports, alerts) |
