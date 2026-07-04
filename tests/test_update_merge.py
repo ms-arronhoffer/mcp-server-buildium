@@ -142,7 +142,7 @@ class _FakeClient:
 async def _get_tool(register: Any, client: Any, name: str) -> Any:
     mcp = FastMCP("test")
     register(mcp, client)
-    tools = await mcp.get_tools()
+    tools = await c.list_tools_map(mcp)
     return tools[name]
 
 

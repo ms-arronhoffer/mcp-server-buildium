@@ -13,6 +13,7 @@ import pytest
 from fastmcp import FastMCP
 
 from mcp_server_buildium.llm import artifacts
+from mcp_server_buildium.tools._common import list_tools_map
 from mcp_server_buildium.tools.alerts import register_alert_tools
 from mcp_server_buildium.tools.close import register_close_tools
 from mcp_server_buildium.tools.reports import register_report_tools
@@ -21,7 +22,7 @@ from mcp_server_buildium.tools.reports import register_report_tools
 async def _get_tool(register: Any, client: Any, name: str) -> Any:
     mcp = FastMCP("test")
     register(mcp, client)
-    tools = await mcp.get_tools()
+    tools = await list_tools_map(mcp)
     return tools[name]
 
 

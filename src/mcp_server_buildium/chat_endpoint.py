@@ -29,6 +29,7 @@ from .llm.artifacts import current_artifacts
 from .llm.attachments import Attachment, AttachmentError, current_attachments
 from .logging_config import get_logger
 from .security.policy import effective_policy_for_claims
+from .tools._common import list_tools_map
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from fastmcp.server.auth.auth import TokenVerifier
@@ -222,7 +223,7 @@ def register_chat_routes(
 
         # Advertise the in-process, policy-guarded tools to the model, filtered to
         # the caller's permitted set.
-        tool_map = await mcp.get_tools()
+        tool_map = await list_tools_map(mcp)
         tool_specs = [
             {
                 "name": name,

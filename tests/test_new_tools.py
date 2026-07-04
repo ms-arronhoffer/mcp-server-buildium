@@ -36,7 +36,7 @@ class _FakeModel:
 async def _get_tool(register: Any, client: Any, name: str) -> Any:
     mcp = FastMCP("test")
     register(mcp, client)
-    tools = await mcp.get_tools()
+    tools = await c.list_tools_map(mcp)
     return tools[name]
 
 
@@ -109,7 +109,7 @@ async def test_get_reference_data_unknown_topic_is_validation_error() -> None:
 async def test_reference_resources_registered() -> None:
     mcp = FastMCP("test")
     register_reference_tools(mcp, object())
-    resources = await mcp.get_resources()
+    resources = await c.list_resources_map(mcp)
     assert any("reference/lease-statuses" in uri for uri in resources)
 
 
@@ -281,5 +281,5 @@ async def test_new_category_registrars_expose_expected_tools() -> None:
     for register, expected in checks:
         mcp = FastMCP("test")
         register(mcp, _FakeClient())
-        tools = await mcp.get_tools()
+        tools = await c.list_tools_map(mcp)
         assert expected in tools

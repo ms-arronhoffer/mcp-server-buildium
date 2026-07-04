@@ -19,12 +19,13 @@ classifiers = [
 ]
 
 dependencies = [
-    # Pin a secure floor: fastmcp < 2.14.0 ships MCP < 1.23 (CVE-2025-66416) and
-    # < 2.14.2 is affected by an OAuth Proxy token-reuse advisory. Stay on the
-    # 2.x line (the 3.x series changes the FastMCP tool API this server relies
-    # on). The OAuth Proxy / OpenAPI advisories fixed only in 3.2.0 do not apply
-    # here because this server uses neither of those FastMCP features.
-    "fastmcp>=2.14.2,<3",
+    # Pin a secure floor on the FastMCP 3.x line. 3.4.1 floors Starlette at
+    # >=1.0.1 (CVE-2026-48710), which the 2.x line only constrained transitively
+    # through mcp. Earlier advisories (CVE-2025-66416 for MCP < 1.23, the OAuth
+    # Proxy token-reuse issue, and the OAuth Proxy / OpenAPI fixes from 3.2.0)
+    # are all resolved on this floor. The public @mcp.tool() surface is unchanged
+    # from 2.x; only internal touchpoints (auth, middleware, tool objects) differ.
+    "fastmcp>=3.4.1,<4",
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
     "httpx>=0.27.0",
