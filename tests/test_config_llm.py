@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from mcp_server_buildium.config import BuildiumConfig
@@ -88,8 +90,6 @@ def test_default_system_prompt_present() -> None:
 # ---------------------------------------------------------------------------
 # Router config tests
 # ---------------------------------------------------------------------------
-
-import json  # noqa: E402
 
 
 def _router_cfg(**overrides) -> BuildiumConfig:

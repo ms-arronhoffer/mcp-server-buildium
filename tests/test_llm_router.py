@@ -146,8 +146,18 @@ def test_classify_empty_messages():
 # -- Sort by task ------------------------------------------------------------
 
 
+class _StubProvider(LLMProvider):
+    """Minimal no-op provider for sort tests (never called)."""
+
+    def __init__(self) -> None:
+        super().__init__(api_key="", model="stub", base_url="")
+
+    async def complete(self, messages, tools):  # pragma: no cover
+        raise NotImplementedError
+
+
 def _entries(*names: str) -> list[RouterEntry]:
-    return [RouterEntry(provider_name=n, model=f"{n}-model", provider=None) for n in names]  # type: ignore[arg-type]
+    return [RouterEntry(provider_name=n, model=f"{n}-model", provider=_StubProvider()) for n in names]
 
 
 def test_sort_reasoning_prefers_anthropic_first():
@@ -235,7 +245,7 @@ async def test_router_all_fail_raises():
     e1 = RouterEntry("openai", "gpt-4o", FakeProvider([], fail=True))
     e2 = RouterEntry("anthropic", "claude", FakeProvider([], fail=True))
     router = ModelRouter([e1, e2], strategy="fallback")
-    with pytest.raises(RuntimeError, match="All 2 configured router provider"):
+    with pytest.raises(RuntimeError, match=r"All \d+ configured router providers failed"):
         await router.complete([_user("hi")], [])
 
 

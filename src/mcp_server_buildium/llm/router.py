@@ -238,7 +238,7 @@ class ModelRouter(LLMProvider):
 
         # First call: pick an ordered list and try each until one succeeds.
         ordered, reason = self._pick_ordered(messages)
-        last_exc: Exception = RuntimeError("No router providers configured")
+        last_exc: Exception = RuntimeError("No providers available to try")
         for entry in ordered:
             try:
                 completion = await entry.provider.complete(messages, tools)
@@ -255,7 +255,7 @@ class ModelRouter(LLMProvider):
             return completion
 
         raise RuntimeError(
-            f"All {len(ordered)} configured router provider(s) failed. "
+            f"All {len(ordered)} configured router providers failed. "
             f"Last error: {last_exc}"
         )
 
