@@ -124,6 +124,21 @@ def register_chat_routes(
 ) -> None:
     """Register the ``/chat`` and ``/capabilities`` routes on the FastMCP app."""
 
+    # A single shared HTTP client is reused across all chat requests. Building a
+    # provider per request (via ``build_llm``) would otherwise lazily create a
+    # fresh ``httpx.AsyncClient`` on every turn that is never closed, leaking
+    # sockets/file descriptors until the server stops responding. The client is
+    # created lazily on first use and reused for the process lifetime; httpx
+    # ``AsyncClient`` instances are safe for concurrent use.
+    shared_client: dict[str, Any] = {"client": None}
+
+    def _get_shared_client() -> Any:
+        import httpx
+
+        if shared_client["client"] is None:
+            shared_client["client"] = httpx.AsyncClient(timeout=60.0)
+        return shared_client["client"]
+
     # When an Entra App Role map is configured (with Entra auth), each chat turn
     # only advertises/executes tools the caller's role permits.
     role_map = config.get_entra_role_policy_map()
@@ -244,7 +259,7 @@ def register_chat_routes(
             result = await tool.run(args)
             return flatten_tool_result(result)
 
-        provider = build_llm(config, model=requested_model or None)
+        provider = build_llm(config, model=requested_model or None, client=_get_shared_client())
 
         async def event_stream():
             # Publish this request's attachments so in-process tools (e.g.

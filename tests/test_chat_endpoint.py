@@ -382,3 +382,37 @@ def test_chat_artifacts_do_not_leak_between_requests(client, monkeypatch) -> Non
     assert resp.status_code == 200
     events = _sse_events(resp.text)
     assert not [e for e in events if e["type"] == "artifact"]
+
+
+def test_chat_reuses_single_http_client_across_requests(client, monkeypatch) -> None:
+    """The /chat route must reuse one shared httpx client, not leak one per request.
+
+    Regression test: previously each request built a provider that lazily created
+    a fresh ``httpx.AsyncClient`` which was never closed, leaking sockets/file
+    descriptors until the server stopped responding after a few requests.
+    """
+
+    class StubProvider:
+        def __init__(self, *a, **k) -> None:
+            pass
+
+        async def complete(self, messages, tools):
+            return Completion(content="ok")
+
+    seen_clients = []
+
+    def _capture(config, *, model=None, client=None):
+        seen_clients.append(client)
+        return StubProvider()
+
+    monkeypatch.setattr(chat_endpoint, "build_llm", _capture)
+
+    for _ in range(3):
+        resp = client.post("/chat", json={"messages": [{"role": "user", "content": "hi"}]})
+        assert resp.status_code == 200
+
+    # A client was supplied on every request...
+    assert len(seen_clients) == 3
+    assert all(c is not None for c in seen_clients)
+    # ...and it was the *same* shared instance each time (no per-request leak).
+    assert seen_clients[0] is seen_clients[1] is seen_clients[2]
