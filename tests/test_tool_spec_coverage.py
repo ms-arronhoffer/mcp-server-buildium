@@ -192,6 +192,9 @@ def _tool_request_models() -> dict[str, tuple[str, str]]:
 
         class RequestModelCollector(ast.NodeVisitor):
             def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:  # noqa: N802
+                if not node.name.startswith(("create_", "update_")):
+                    self.generic_visit(node)
+                    return
                 model: tuple[str, str] | None = None
                 for sub in ast.walk(node):
                     if not isinstance(sub, ast.Call):
@@ -225,6 +228,8 @@ def _tool_request_models() -> dict[str, tuple[str, str]]:
                     elif isinstance(sub.func, ast.Name) and sub.func.id in imported_models:
                         model = imported_models[sub.func.id]
                 if model is not None:
+                    if node.name in request_models:
+                        raise AssertionError(f"Duplicate tool request-model definition for {node.name}")
                     request_models[node.name] = model
                 self.generic_visit(node)
 
