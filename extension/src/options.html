@@ -64,7 +64,14 @@
           </select>
 
           <label for="notificationPollMinutes">Polling interval (minutes)</label>
-          <input id="notificationPollMinutes" type="number" min="1" max="1440" />
+          <input
+            id="notificationPollMinutes"
+            type="number"
+            min="1"
+            max="1440"
+            aria-describedby="notificationPollMinutesHint"
+          />
+          <p id="notificationPollMinutesHint" class="hint">Valid range: 1 to 1440 minutes.</p>
 
           <label class="checkbox-row">
             <input id="notificationInPanel" type="checkbox" />

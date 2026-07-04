@@ -259,14 +259,21 @@ api.runtime.onMessage.addListener((message) => {
     severity: "info",
     message: text,
     dedupeKey: message.dedupeKey || text,
-    channels: { banner: !!config?.notificationInPanel, chat: !!config?.notificationChat, browser: false },
+    channels: {
+      banner: !!config?.notificationInPanel,
+      chat: !!config?.notificationChat,
+      browser: !!config?.notificationBrowser,
+    },
   });
 });
 
-window.addEventListener("beforeunload", () => {
+function cleanupPanelLifecycle() {
   artifactUrls.revokeAll();
   api.runtime.sendMessage({ type: "panel_closed" }).catch(() => undefined);
-});
+}
+
+window.addEventListener("beforeunload", cleanupPanelLifecycle);
+window.addEventListener("pagehide", cleanupPanelLifecycle);
 
 els.messages.innerHTML = '<div class="empty">Ask a question to get started.</div>';
 api.runtime.sendMessage({ type: "panel_open" }).catch(() => undefined);

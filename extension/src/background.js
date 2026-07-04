@@ -27,5 +27,9 @@ if (api.sidePanel && api.sidePanel.setPanelBehavior) {
 bindRoleNotificationMessages();
 bindRoleNotificationAlarms();
 bindRoleNotificationConfigChanges();
-configureRoleNotificationPolling().catch(() => undefined);
-runRoleNotificationPoll().catch(() => undefined);
+configureRoleNotificationPolling().catch((err) => {
+  console.warn("Failed to configure role notification polling:", err);
+});
+runRoleNotificationPoll().catch((err) => {
+  console.warn("Initial role notification poll failed:", err);
+});

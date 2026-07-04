@@ -92,7 +92,9 @@ export function bindRoleNotificationMessages() {
 export function bindRoleNotificationAlarms() {
   api.alarms.onAlarm.addListener((alarm) => {
     if (alarm?.name !== POLL_ALARM) return;
-    runRoleNotificationPoll().catch(() => undefined);
+    runRoleNotificationPoll().catch((err) => {
+      console.warn("Role notification poll failed:", err);
+    });
   });
 }
 
@@ -100,6 +102,8 @@ export function bindRoleNotificationConfigChanges() {
   api.storage.onChanged?.addListener((changes, areaName) => {
     if (areaName !== "local") return;
     if (!changes.buildium_mcp_config) return;
-    configureRoleNotificationPolling().catch(() => undefined);
+    configureRoleNotificationPolling().catch((err) => {
+      console.warn("Failed to reconfigure notification polling:", err);
+    });
   });
 }

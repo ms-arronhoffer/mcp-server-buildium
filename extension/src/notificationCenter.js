@@ -1,6 +1,7 @@
 import { getApi } from "./browser.js";
 
 const DEFAULT_WINDOW_MS = 30_000;
+const MAX_KEY_LEN = 200;
 
 /**
  * Multi-channel notifications with lightweight dedupe/rate-limiting.
@@ -20,7 +21,8 @@ export class NotificationCenter {
 
   notify(event) {
     const now = Date.now();
-    const key = String(event?.dedupeKey || `${event?.type || "system"}:${event?.message || ""}`);
+    const fallback = `${event?.type || "system"}:${event?.message || ""}`.slice(0, MAX_KEY_LEN);
+    const key = String(event?.dedupeKey || fallback);
     const prev = this.seen.get(key) || 0;
     if (now - prev < this.windowMs) return false;
     this.seen.set(key, now);
