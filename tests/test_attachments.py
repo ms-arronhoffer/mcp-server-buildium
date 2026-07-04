@@ -130,3 +130,20 @@ def test_current_attachments_contextvar_roundtrip() -> None:
     finally:
         current_attachments.reset(token)
     assert list_current_attachment_names() == []
+
+
+def test_extract_docx_rejects_zip_bomb() -> None:
+    """A DOCX whose inner XML decompresses to a huge size is refused (not read)."""
+    from mcp_server_buildium.llm.attachments import _MAX_DOCX_ENTRY_BYTES, _extract_docx_text
+
+    huge = b"A" * (_MAX_DOCX_ENTRY_BYTES + 1024)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("word/document.xml", huge)
+    assert _extract_docx_text(buf.getvalue()) is None
+
+
+def test_extract_docx_reads_normal_document() -> None:
+    from mcp_server_buildium.llm.attachments import _extract_docx_text
+
+    assert _extract_docx_text(_docx_bytes("Hello world")) == "Hello world"

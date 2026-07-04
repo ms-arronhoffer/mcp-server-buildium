@@ -166,3 +166,38 @@ def test_current_artifacts_registry_roundtrip() -> None:
         current_artifacts.reset(token)
     # Reset restores the empty default outside the request scope.
     assert get_current_artifacts() == []
+
+
+def _read_csv_cells(data: bytes) -> list[list[str]]:
+    """Decode a generated CSV artifact (stripping the UTF-8 BOM) into rows."""
+    text = data.decode("utf-8-sig")
+    return list(csv.reader(io.StringIO(text)))
+
+
+def test_csv_neutralizes_formula_injection() -> None:
+    # Cells that a spreadsheet would evaluate as formulas must be prefixed with
+    # a single quote so they render as literal text (CSV/formula injection).
+    gf = build_generated_file(
+        file_format="csv",
+        columns=["Name", "Note"],
+        rows=[
+            ["=1+1", "+SUM(A1:A9)"],
+            ["-2+3", "@cmd"],
+            ["safe", "normal text"],
+        ],
+    )
+    cells = _read_csv_cells(gf.data)
+    assert cells[1] == ["'=1+1", "'+SUM(A1:A9)"]
+    assert cells[2] == ["'-2+3", "'@cmd"]
+    # Benign values are left untouched.
+    assert cells[3] == ["safe", "normal text"]
+
+
+def test_csv_neutralizes_formula_injection_in_headers() -> None:
+    gf = build_generated_file(
+        file_format="csv",
+        columns=["=danger", "ok"],
+        rows=[["a", "b"]],
+    )
+    cells = _read_csv_cells(gf.data)
+    assert cells[0] == ["'=danger", "ok"]

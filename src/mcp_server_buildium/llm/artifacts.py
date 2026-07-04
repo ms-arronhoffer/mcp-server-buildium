@@ -186,6 +186,28 @@ def _normalize_filename(filename: str | None, title: str | None, fmt: str, exten
 # ---------------------------------------------------------------------------
 # CSV
 # ---------------------------------------------------------------------------
+# Leading characters that spreadsheet applications (Excel, LibreOffice, Google
+# Sheets) treat as the start of a formula. A cell beginning with one of these is
+# neutralised by prefixing a single quote so it is rendered as literal text and
+# never evaluated (CSV/formula injection, CWE-1236).
+_CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _csv_safe(value: object) -> str:
+    """Return a spreadsheet-safe string for a CSV cell.
+
+    Values that would otherwise be interpreted as a formula by a spreadsheet
+    application are prefixed with a single quote so the content is treated as
+    literal text (defends against CSV/formula injection).
+    """
+    if value is None:
+        return ""
+    text = str(value)
+    if text and text[0] in _CSV_FORMULA_PREFIXES:
+        return "'" + text
+    return text
+
+
 def _build_csv(columns: list[str], rows: list[list[object]]) -> bytes:
     """Serialize tabular content as UTF-8 CSV (with a BOM for Excel)."""
     if not columns and not rows:
@@ -193,9 +215,9 @@ def _build_csv(columns: list[str], rows: list[list[object]]) -> bytes:
     buffer = io.StringIO()
     writer = csv.writer(buffer)
     if columns:
-        writer.writerow(columns)
+        writer.writerow([_csv_safe(col) for col in columns])
     for row in rows:
-        writer.writerow(["" if cell is None else str(cell) for cell in row])
+        writer.writerow([_csv_safe(cell) for cell in row])
     # A UTF-8 BOM makes Excel open non-ASCII CSVs with the correct encoding.
     return b"\xef\xbb\xbf" + buffer.getvalue().encode("utf-8")
 

@@ -201,3 +201,19 @@ async def test_multi_issuer_rejects_unknown_issuer(key_pair: RSAKeyPair) -> None
         subject="user-1",
     )
     assert await verifier.verify_token(token) is None
+
+
+@pytest.mark.asyncio
+async def test_multi_issuer_empty_accepted_set_rejects_all(key_pair: RSAKeyPair) -> None:
+    """Fail secure: an empty accepted-issuer set must reject every token."""
+    verifier = MultiIssuerJWTVerifier(
+        accepted_issuers=[],
+        public_key=key_pair.public_key,
+        audience="api://app",
+    )
+    token = key_pair.create_token(
+        issuer="https://login.microsoftonline.com/tid/v2.0",
+        audience="api://app",
+        subject="user-1",
+    )
+    assert await verifier.verify_token(token) is None

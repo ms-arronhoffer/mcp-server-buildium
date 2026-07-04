@@ -58,16 +58,22 @@ class MultiIssuerJWTVerifier(JWTVerifier):
         result = await super().load_access_token(token)
         if result is None:
             return None
-        if self.accepted_issuers:
-            iss = result.claims.get("iss")
-            if iss not in self.accepted_issuers:
-                self.logger.debug(
-                    "Token validation failed: issuer %r not in accepted issuers %s",
-                    iss,
-                    self.accepted_issuers,
-                )
-                self.logger.info("Rejecting request: issuer not in accepted set")
-                return None
+        # Fail secure: an empty accepted-issuer set must reject every token
+        # rather than skip issuer validation entirely.
+        if not self.accepted_issuers:
+            self.logger.error(
+                "Rejecting request: issuer validation misconfigured (no accepted issuers)"
+            )
+            return None
+        iss = result.claims.get("iss")
+        if iss not in self.accepted_issuers:
+            self.logger.debug(
+                "Token validation failed: issuer %r not in accepted issuers %s",
+                iss,
+                self.accepted_issuers,
+            )
+            self.logger.info("Rejecting request: issuer not in accepted set")
+            return None
         return result
 
 
