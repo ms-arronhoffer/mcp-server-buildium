@@ -123,6 +123,15 @@ def _ok(result: dict) -> dict:
     return result
 
 
+def _create_tool_kwargs(tool_name: str, payload: dict) -> dict[str, dict]:
+    payload_arg = {
+        "create_rental_unit": "unit_data",
+        "create_association_unit": "unit_data",
+        "create_task_category": "category_data",
+    }[tool_name]
+    return {payload_arg: payload}
+
+
 @pytest.mark.parametrize(
     ("tool_name", "kwargs", "min_count"),
     [
@@ -277,6 +286,84 @@ def test_partial_bank_account_update(tools, run):
         run(tools["update_bank_account"].fn(bank_account_id=1, bank_account_data={"Description": "new"}))
     )
     assert result["data"]["Description"] == "new"
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "payload", "field_name"),
+    [
+        (
+            "create_rental_unit",
+            {"PropertyId": 1, "Address": {"AddressLine1": "100 Main", "City": "X", "State": "IL"}},
+            "UnitNumber",
+        ),
+        (
+            "create_association_unit",
+            {
+                "AssociationId": 1,
+                "Address": {"AddressLine1": "100 Main", "City": "X", "State": "IL"},
+            },
+            "UnitNumber",
+        ),
+        ("create_task_category", {}, "Name"),
+    ],
+)
+def test_create_tools_enforce_openapi_required_fields(tools, run, tool_name, payload, field_name):
+    result = run(tools[tool_name].fn(**_create_tool_kwargs(tool_name, payload)))
+    assert result["error"] is not None
+    assert result["error"]["code"] == "validation_error"
+    assert field_name in result["error"]["message"]
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "kwargs", "key", "expected"),
+    [
+        (
+            "create_rental_unit",
+            {
+                "unit_data": {
+                    "UnitNumber": "U-NEW-1",
+                    "PropertyId": 1,
+                    "Address": {
+                        "AddressLine1": "500 Elm Street",
+                        "City": "Springfield",
+                        "State": "IL",
+                        "PostalCode": "62701",
+                        "Country": "UnitedStates",
+                    },
+                }
+            },
+            "UnitNumber",
+            "U-NEW-1",
+        ),
+        (
+            "create_association_unit",
+            {
+                "unit_data": {
+                    "UnitNumber": "A-NEW-1",
+                    "AssociationId": 1,
+                    "Address": {
+                        "AddressLine1": "700 Oak Avenue",
+                        "City": "Springfield",
+                        "State": "IL",
+                        "PostalCode": "62701",
+                        "Country": "UnitedStates",
+                    },
+                }
+            },
+            "UnitNumber",
+            "A-NEW-1",
+        ),
+        (
+            "create_task_category",
+            {"category_data": {"Name": "Urgent Repairs"}},
+            "Name",
+            "Urgent Repairs",
+        ),
+    ],
+)
+def test_create_tools_round_trip_through_mockapi(tools, run, tool_name, kwargs, key, expected):
+    result = _ok(run(tools[tool_name].fn(**kwargs)))
+    assert result["data"][key] == expected
 
 
 def test_readonly_policy_blocks_mutations_e2e(mock_server, event_loop):

@@ -7,7 +7,9 @@ offline (no credentials, no network) by introspecting the FastMCP server.
 
 from __future__ import annotations
 
+import ast
 import asyncio
+import importlib
 import json
 import subprocess
 import sys
@@ -18,6 +20,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 OPENAPI_PATH = REPO_ROOT / "openapi.json"
 REPORT_PATH = REPO_ROOT / "docs" / "tool-coverage.md"
+TOOLS_PATH = REPO_ROOT / "src" / "mcp_server_buildium" / "tools"
 
 
 @pytest.fixture(scope="module")
@@ -131,6 +134,147 @@ def test_operation_mappings_are_unique(tool_operations: dict[str, str]) -> None:
             seen[op] = tool
     # Duplicates are allowed only where genuinely intended; today there are none.
     assert not duplicates, f"Multiple tools map to the same operation: {duplicates}"
+
+
+def _request_body_schema_name(operation: dict) -> str | None:
+    """Return the request-body schema class name for an OpenAPI operation, if any."""
+    request_body = operation.get("requestBody")
+    if not isinstance(request_body, dict):
+        return None
+    content = request_body.get("content")
+    if not isinstance(content, dict):
+        return None
+    app_json = content.get("application/json")
+    if not isinstance(app_json, dict):
+        return None
+    return _schema_name(app_json.get("schema"))
+
+
+def _schema_name(schema: object) -> str | None:
+    """Resolve the first component-schema class name referenced by ``schema``."""
+    if not isinstance(schema, dict):
+        return None
+    ref = schema.get("$ref")
+    if isinstance(ref, str):
+        return ref.rsplit("/", 1)[-1]
+    all_of = schema.get("allOf")
+    if isinstance(all_of, list):
+        for item in all_of:
+            name = _schema_name(item)
+            if name:
+                return name
+    return None
+
+
+def _tool_request_models() -> dict[str, tuple[str, str]]:
+    """Collect ``tool_name -> (sdk_module, sdk_class)`` request-model references.
+
+    The registry is built by AST-parsing the tool modules and recording the SDK
+    model referenced by each write tool via ``c.create(...)``,
+    ``c.build_model(...)``, or a direct generated-model constructor call.
+    """
+    request_models: dict[str, tuple[str, str]] = {}
+    for path in TOOLS_PATH.glob("*.py"):
+        tree = ast.parse(path.read_text())
+        imported_models: dict[str, tuple[str, str]] = {}
+
+        for node in tree.body:
+            if isinstance(node, ast.Try):
+                for stmt in node.body:
+                    if (
+                        isinstance(stmt, ast.ImportFrom)
+                        and stmt.module
+                        and stmt.module.startswith("mcp_server_buildium.buildium_sdk.models.")
+                    ):
+                        module = stmt.module.rsplit(".", 1)[-1]
+                        for alias in stmt.names:
+                            imported_models[alias.asname or alias.name] = (module, alias.name)
+
+        class RequestModelCollector(ast.NodeVisitor):
+            # ast.NodeVisitor requires visitor names to match AST node class names.
+            def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:  # noqa: N802
+                if not node.name.startswith(("create_", "update_")):
+                    self.generic_visit(node)
+                    return
+                model: tuple[str, str] | None = None
+                for sub in ast.walk(node):
+                    if not isinstance(sub, ast.Call):
+                        continue
+                    if (
+                        isinstance(sub.func, ast.Attribute)
+                        and isinstance(sub.func.value, ast.Name)
+                        and sub.func.value.id == "c"
+                        and sub.func.attr == "create"
+                        and len(sub.args) >= 3
+                        and all(
+                            isinstance(sub.args[i], ast.Constant)
+                            and isinstance(sub.args[i].value, str)
+                            for i in (1, 2)
+                        )
+                    ):
+                        model = (sub.args[1].value, sub.args[2].value)
+                    elif (
+                        isinstance(sub.func, ast.Attribute)
+                        and isinstance(sub.func.value, ast.Name)
+                        and sub.func.value.id == "c"
+                        and sub.func.attr == "build_model"
+                        and len(sub.args) >= 2
+                        and all(
+                            isinstance(sub.args[i], ast.Constant)
+                            and isinstance(sub.args[i].value, str)
+                            for i in (0, 1)
+                        )
+                    ):
+                        model = (sub.args[0].value, sub.args[1].value)
+                    elif isinstance(sub.func, ast.Name) and sub.func.id in imported_models:
+                        model = imported_models[sub.func.id]
+                if model is not None:
+                    if node.name in request_models:
+                        raise AssertionError(f"Duplicate tool request-model definition for {node.name}")
+                    request_models[node.name] = model
+                self.generic_visit(node)
+
+        RequestModelCollector().visit(tree)
+    return request_models
+
+
+def test_every_request_body_tool_uses_the_openapi_request_model(
+    tool_operations: dict[str, str],
+) -> None:
+    spec = json.loads(OPENAPI_PATH.read_text())
+    operations = {
+        op["operationId"]: op
+        for methods in spec.get("paths", {}).values()
+        for op in methods.values()
+        if isinstance(op, dict) and op.get("operationId")
+    }
+    request_models = _tool_request_models()
+
+    missing: list[str] = []
+    mismatched: list[str] = []
+    unresolved: list[str] = []
+
+    for tool_name, operation_id in sorted(tool_operations.items()):
+        expected_class = _request_body_schema_name(operations[operation_id])
+        if expected_class is None:
+            continue
+        actual = request_models.get(tool_name)
+        if actual is None:
+            missing.append(tool_name)
+            continue
+        module_name, class_name = actual
+        try:
+            mod = importlib.import_module(f"mcp_server_buildium.buildium_sdk.models.{module_name}")
+            getattr(mod, class_name)
+        except (ImportError, AttributeError) as exc:
+            unresolved.append(f"{tool_name}: {module_name}.{class_name} ({exc})")
+            continue
+        if class_name != expected_class:
+            mismatched.append(f"{tool_name}: expected {expected_class}, got {class_name}")
+
+    assert not missing, f"Request-body tools missing request model construction: {missing}"
+    assert not unresolved, f"Request models must resolve from generated SDK: {unresolved}"
+    assert not mismatched, f"Request models must match OpenAPI request schemas: {mismatched}"
 
 
 def test_coverage_report_is_current() -> None:
