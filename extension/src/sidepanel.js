@@ -155,7 +155,9 @@ function watchComposerResize() {
   if (typeof ResizeObserver === "undefined") return;
   const observer = new ResizeObserver(() => {
     const height = els.input.offsetHeight;
-    // Ignore height changes we caused ourselves via autoGrowInput().
+    // Ignore height changes we caused ourselves via autoGrowInput(). The 1px
+    // tolerance absorbs sub-pixel rounding differences between the height we
+    // set and the value the browser reports back to the observer.
     if (Math.abs(height - lastAutoComposerHeight) <= 1) return;
     lastAutoComposerHeight = height;
     panelPrefs.composerHeight = height;
@@ -605,7 +607,10 @@ window.addEventListener("pagehide", cleanupPanelLifecycle);
 // the user to close and reopen the side panel.
 api.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local" || !changes[CONFIG_STORAGE_KEY]) return;
-  ensureReady().catch(() => undefined);
+  ensureReady().catch((err) => {
+    // Best-effort refresh; surface the reason so a failed reload is diagnosable.
+    console.error("Failed to apply updated configuration:", err);
+  });
 });
 
 async function init() {
