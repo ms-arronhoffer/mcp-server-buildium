@@ -1,4 +1,4 @@
-"""Communications tools for Buildium (announcements, phone logs, templates).
+"""Communications tools for Buildium (announcements, phone logs, mailing templates).
 
 Enables resident/owner outreach: create and manage announcements, log and manage
 phone calls, and read mailing templates.
