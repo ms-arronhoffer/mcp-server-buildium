@@ -15,9 +15,16 @@
 * 💸 **Month-End Close Automation** - Post rent, apply payments oldest-first, assess late fees, and produce owner statements in one instruction (dry-run by default)
 * 🔔 **Proactive Alerts & Digest** - A rules layer for scheduled, push-style intelligence (lease expirations, late rent, low reserves, aging work orders)
 * 📊 **Trustworthy Financial Reports** - Deterministic, reconciled rent roll, aged receivables, and P&L with branded PDF/XLSX/CSV export
+* 💬 **Conversational AI Assistant** - A built-in server-side assistant (`/chat`) that drives every tool for you over OpenAI, Anthropic, or Google Gemini — provider keys stay on the server and are **never** shipped to the client
+* 📎 **Document Intake → Records** - Drop in a lease PDF, image, or scan and the assistant extracts the fields, links referenced entities, and creates the Buildium records (multimodal, confirmation-gated)
+* ⬇️ **Instant File Exports** - Ask for "a spreadsheet of my active leases" or "a PDF report" and get a downloadable CSV, Excel, Word, PDF, or PowerPoint artifact — built with the Python standard library, no extra dependencies
+* 🧩 **Browser Extension Side Panel** - A Manifest V3 Chrome/Firefox side-panel chat UI (Gemini-style) that talks to the server and signs users in with Microsoft Entra ID
+* 🔑 **Microsoft Entra ID SSO & Per-User Scoping** - Verify Entra access tokens against the rotating JWKS and map App Roles/groups to per-user tool policies (admin/operator/readonly)
+* 📚 **Reference Vocabularies as MCP Resources** - Controlled enum vocabularies published as `buildium://reference/*` MCP resources so clients can validate before writing
 * 📋 **Selective Tool Loading** - Enable only the categories you need
 * 🛡️ **Roles & Guardrails** - Read-only mode, RBAC roles, allow/deny lists, rate limiting
 * 🧾 **Audit Trail** - Structured, redacted audit events with pluggable sinks and reporting
+* 🧪 **Bundled Mock API** - A seeded, offline Buildium mock for local end-to-end testing without real credentials
 * 🏢 **Multi-Property Types** - Rentals, associations, and units
 * 🔌 **MCP Protocol** - Compatible with Claude Desktop, Cursor, and other MCP clients
 
