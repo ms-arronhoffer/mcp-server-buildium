@@ -21,6 +21,9 @@ AUDIT_SINKS = frozenset({"log", "file", "none"})
 # Supported server-side LLM providers for the /chat endpoint.
 LLM_PROVIDERS = frozenset({"openai", "anthropic", "gemini"})
 
+# Supported model-router strategies.
+LLM_ROUTER_STRATEGIES = frozenset({"classifier", "fallback"})
+
 # Tool categories supported by the server. Kept here so both the server and
 # validation tooling share a single source of truth.
 ALL_CATEGORIES = frozenset(
@@ -244,6 +247,38 @@ class BuildiumConfig(BaseSettings):
         description="Base URL for the Google Gemini generateContent API.",
     )
 
+    # --- Model router (multi-provider automatic routing) -------------------
+    llm_router_enabled: bool = Field(
+        default=False,
+        description=(
+            "Enable the model router. When true, each /chat request is automatically "
+            "routed to the best provider/model based on the prompt. "
+            "BUILDIUM_LLM_ROUTER_PROVIDERS must also be set. "
+            "The single-provider BUILDIUM_LLM_PROVIDER/MODEL fields are ignored "
+            "when the router is active, but their API-key/base-URL counterparts "
+            "(BUILDIUM_LLM_OPENAI_API_KEY, etc.) are still used by the router."
+        ),
+    )
+    llm_router_providers: str | None = Field(
+        default=None,
+        description=(
+            "Ordered JSON array of provider+model pairs for the router. "
+            'Each entry must have "provider" (openai|anthropic|gemini) and "model". '
+            "The API key for each provider must be set via the corresponding "
+            "BUILDIUM_LLM_<PROVIDER>_API_KEY variable. "
+            'Example: [{"provider":"anthropic","model":"claude-opus-4-5"},'
+            '{"provider":"openai","model":"gpt-4o"}]'
+        ),
+    )
+    llm_router_strategy: str = Field(
+        default="classifier",
+        description=(
+            "Model-router strategy: "
+            "'classifier' (heuristic prompt classification selects the best provider) or "
+            "'fallback' (try providers in config order, fall back on failure)."
+        ),
+    )
+
     # --- Development auth bypass -------------------------------------------
     dev_auth_bypass: bool = Field(
         default=False,
@@ -354,6 +389,14 @@ class BuildiumConfig(BaseSettings):
 
     def _validate_llm(self) -> None:
         """Validate the optional server-side LLM configuration."""
+        if self.llm_router_enabled:
+            # Router mode: validate router config; single-provider fields are ignored.
+            self._validate_llm_router()
+            if self.llm_max_tool_rounds < 1:
+                raise ValueError("BUILDIUM_LLM_MAX_TOOL_ROUNDS must be >= 1")
+            return
+
+        # Single-provider mode.
         if self.llm_provider is None:
             return
         provider = self.llm_provider.strip().lower()
@@ -377,6 +420,58 @@ class BuildiumConfig(BaseSettings):
             )
         if self.llm_max_tool_rounds < 1:
             raise ValueError("BUILDIUM_LLM_MAX_TOOL_ROUNDS must be >= 1")
+
+    def _validate_llm_router(self) -> None:
+        """Validate BUILDIUM_LLM_ROUTER_PROVIDERS and related router settings."""
+        if not (self.llm_router_providers and self.llm_router_providers.strip()):
+            raise ValueError(
+                "BUILDIUM_LLM_ROUTER_PROVIDERS is required when "
+                "BUILDIUM_LLM_ROUTER_ENABLED=true"
+            )
+        try:
+            entries = json.loads(self.llm_router_providers)
+        except (ValueError, TypeError) as exc:
+            raise ValueError(
+                "BUILDIUM_LLM_ROUTER_PROVIDERS must be a valid JSON array"
+            ) from exc
+        if not isinstance(entries, list) or not entries:
+            raise ValueError(
+                "BUILDIUM_LLM_ROUTER_PROVIDERS must be a non-empty JSON array"
+            )
+        _key_map = {
+            "openai": self.llm_openai_api_key,
+            "anthropic": self.llm_anthropic_api_key,
+            "gemini": self.llm_gemini_api_key,
+        }
+        for i, entry in enumerate(entries):
+            if not isinstance(entry, dict):
+                raise ValueError(
+                    f"BUILDIUM_LLM_ROUTER_PROVIDERS[{i}] must be a JSON object"
+                )
+            raw_provider = entry.get("provider", "")
+            if not isinstance(raw_provider, str) or raw_provider.strip().lower() not in LLM_PROVIDERS:
+                raise ValueError(
+                    f"BUILDIUM_LLM_ROUTER_PROVIDERS[{i}].provider must be one of "
+                    f"{sorted(LLM_PROVIDERS)}, got {raw_provider!r}"
+                )
+            pname = raw_provider.strip().lower()
+            model = entry.get("model", "")
+            if not isinstance(model, str) or not model.strip():
+                raise ValueError(
+                    f"BUILDIUM_LLM_ROUTER_PROVIDERS[{i}].model must be a non-empty string"
+                )
+            key = _key_map.get(pname)
+            if not (key and key.strip()):
+                raise ValueError(
+                    f"BUILDIUM_LLM_ROUTER_PROVIDERS[{i}]: provider {pname!r} requires "
+                    f"BUILDIUM_LLM_{pname.upper()}_API_KEY to be set"
+                )
+        strategy = (self.llm_router_strategy or "").strip().lower()
+        if strategy not in LLM_ROUTER_STRATEGIES:
+            raise ValueError(
+                f"BUILDIUM_LLM_ROUTER_STRATEGY must be one of "
+                f"{sorted(LLM_ROUTER_STRATEGIES)}, got {self.llm_router_strategy!r}"
+            )
 
     @classmethod
     def from_env(cls) -> "BuildiumConfig":
@@ -500,17 +595,27 @@ class BuildiumConfig(BaseSettings):
 
     # --- LLM helpers -------------------------------------------------------
     def llm_enabled(self) -> bool:
-        """Return True when a server-side LLM provider is configured."""
+        """Return True when a server-side LLM provider is configured (router or single)."""
+        if self.llm_router_enabled:
+            return True
         return bool(self.llm_provider and self.llm_provider.strip())
 
     def get_llm_provider(self) -> str | None:
-        """Return the normalized (lower-case) active provider name, or None."""
+        """Return the normalized (lower-case) active provider name, or None.
+
+        Returns ``'router'`` when the model router is active.
+        """
+        if self.llm_router_enabled:
+            return "router"
         if not self.llm_enabled():
             return None
         return self.llm_provider.strip().lower()
 
     def get_active_llm_key(self) -> str | None:
-        """Return the API key for the active provider (never logged/returned to clients)."""
+        """Return the API key for the active single provider (never logged/returned to clients).
+
+        Returns ``None`` in router mode — the router resolves keys per entry.
+        """
         return {
             "openai": self.llm_openai_api_key,
             "anthropic": self.llm_anthropic_api_key,
@@ -518,7 +623,10 @@ class BuildiumConfig(BaseSettings):
         }.get(self.get_llm_provider() or "")
 
     def get_llm_base_url(self) -> str | None:
-        """Return the base URL for the active provider."""
+        """Return the base URL for the active single provider.
+
+        Returns ``None`` in router mode — the router resolves URLs per entry.
+        """
         return {
             "openai": self.llm_openai_base_url,
             "anthropic": self.llm_anthropic_base_url,
@@ -533,15 +641,36 @@ class BuildiumConfig(BaseSettings):
         return models or None
 
     def get_llm_models(self) -> list[str]:
-        """Return the models a client may select (allow-list, else just the default)."""
+        """Return the models a client may select.
+
+        In router mode, returns all models across configured router providers.
+        In single-provider mode, returns the allow-list or the sole default model.
+        """
+        if self.llm_router_enabled:
+            entries = self.get_llm_router_providers() or []
+            return [e["model"] for e in entries]
         allowed = self.get_llm_allowed_models()
         if allowed is not None:
             return allowed
         return [self.llm_model] if self.llm_model else []
 
     def is_llm_model_allowed(self, model: str) -> bool:
-        """Return True when ``model`` is permitted for client selection."""
+        """Return True when ``model`` is permitted for client selection.
+
+        In router mode an empty model string means 'auto-route' and is always
+        allowed. A non-empty model must match one of the configured router models.
+        """
+        if self.llm_router_enabled:
+            if not model:  # empty → auto-route
+                return True
+            return model in self.get_llm_models()
         return model in self.get_llm_models()
+
+    def get_llm_router_providers(self) -> list[dict] | None:
+        """Return the parsed router provider list, or None when the router is off."""
+        if not self.llm_router_enabled or not self.llm_router_providers:
+            return None
+        return json.loads(self.llm_router_providers)
 
     def get_llm_system_prompt(self) -> str:
         """Return the system prompt for the assistant (default when unset)."""

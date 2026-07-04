@@ -26,7 +26,8 @@ from .attachments import (
     normalize_attachments,
     set_current_attachments,
 )
-from .base import Completion, LLMProvider, ToolCall, build_provider
+from .base import Completion, LLMProvider, ToolCall, build_llm, build_provider
+from .router import ModelRouter, RouterEntry, build_router, classify_task
 
 __all__ = [
     "ArtifactError",
@@ -36,12 +37,17 @@ __all__ = [
     "Completion",
     "GeneratedFile",
     "LLMProvider",
+    "ModelRouter",
+    "RouterEntry",
     "Section",
     "Slide",
     "ToolCall",
     "add_current_artifact",
     "build_generated_file",
+    "build_llm",
     "build_provider",
+    "build_router",
+    "classify_task",
     "flatten_tool_result",
     "get_current_artifacts",
     "mb_to_bytes",

@@ -16,7 +16,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, StreamingResponse
 
 from .llm import (
-    build_provider,
+    build_llm,
     flatten_tool_result,
     get_current_artifacts,
     mb_to_bytes,
@@ -135,14 +135,22 @@ def register_chat_routes(
         if not config.llm_enabled():
             return JSONResponse({"enabled": False, "models": []})
         # Never include API keys or other secrets in this response.
-        return JSONResponse(
-            {
-                "enabled": True,
-                "provider": config.get_llm_provider(),
-                "default_model": config.llm_model,
-                "models": config.get_llm_models(),
-            }
-        )
+        capabilities: dict[str, Any] = {
+            "enabled": True,
+            "provider": config.get_llm_provider(),
+            "default_model": config.llm_model,
+            "models": config.get_llm_models(),
+        }
+        if config.llm_router_enabled:
+            capabilities["routing"] = True
+            capabilities["router_providers"] = [
+                {"provider": e["provider"], "model": e["model"]}
+                for e in (config.get_llm_router_providers() or [])
+            ]
+            capabilities["strategy"] = (
+                config.llm_router_strategy or "classifier"
+            ).strip().lower()
+        return JSONResponse(capabilities)
 
     @mcp.custom_route(CHAT_PATH, methods=["POST"])
     async def chat(request: Request) -> Any:
@@ -235,7 +243,7 @@ def register_chat_routes(
             result = await tool.run(args)
             return flatten_tool_result(result)
 
-        provider = build_provider(config, model=requested_model)
+        provider = build_llm(config, model=requested_model or None)
 
         async def event_stream():
             # Publish this request's attachments so in-process tools (e.g.

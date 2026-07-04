@@ -88,7 +88,7 @@ def test_chat_streams_direct_answer(client, monkeypatch) -> None:
         async def complete(self, messages, tools):
             return Completion(content="Hello from the server.")
 
-    monkeypatch.setattr(chat_endpoint, "build_provider", lambda *a, **k: StubProvider())
+    monkeypatch.setattr(chat_endpoint, "build_llm", lambda *a, **k: StubProvider())
 
     resp = client.post("/chat", json={"messages": [{"role": "user", "content": "hi"}]})
     assert resp.status_code == 200
@@ -111,7 +111,7 @@ def test_chat_executes_inprocess_tool(client, monkeypatch) -> None:
         async def complete(self, messages, tools):
             return completions.pop(0)
 
-    monkeypatch.setattr(chat_endpoint, "build_provider", lambda *a, **k: StubProvider())
+    monkeypatch.setattr(chat_endpoint, "build_llm", lambda *a, **k: StubProvider())
 
     resp = client.post("/chat", json={"messages": [{"role": "user", "content": "status?"}]})
     assert resp.status_code == 200
@@ -232,7 +232,7 @@ def test_chat_system_prompt_includes_current_datetime(client, monkeypatch) -> No
             captured["messages"] = messages
             return Completion(content="Done.")
 
-    monkeypatch.setattr(chat_endpoint, "build_provider", lambda *a, **k: StubProvider())
+    monkeypatch.setattr(chat_endpoint, "build_llm", lambda *a, **k: StubProvider())
 
     resp = client.post("/chat", json={"messages": [{"role": "user", "content": "hi"}]})
     assert resp.status_code == 200
@@ -297,7 +297,7 @@ def test_chat_threads_attachments_to_provider(client, monkeypatch) -> None:
             captured["messages"] = messages
             return Completion(content="Read it.")
 
-    monkeypatch.setattr(chat_endpoint, "build_provider", lambda *a, **k: StubProvider())
+    monkeypatch.setattr(chat_endpoint, "build_llm", lambda *a, **k: StubProvider())
 
     data = base64.b64encode(b"lease terms").decode("ascii")
     resp = client.post(
@@ -348,7 +348,7 @@ def test_chat_streams_artifact_for_generated_file(client, monkeypatch) -> None:
         async def complete(self, messages, tools):
             return completions.pop(0)
 
-    monkeypatch.setattr(chat_endpoint, "build_provider", lambda *a, **k: StubProvider())
+    monkeypatch.setattr(chat_endpoint, "build_llm", lambda *a, **k: StubProvider())
 
     resp = client.post(
         "/chat", json={"messages": [{"role": "user", "content": "export my leases"}]}
@@ -376,7 +376,7 @@ def test_chat_artifacts_do_not_leak_between_requests(client, monkeypatch) -> Non
         async def complete(self, messages, tools):
             return Completion(content="No file this time.")
 
-    monkeypatch.setattr(chat_endpoint, "build_provider", lambda *a, **k: StubProvider())
+    monkeypatch.setattr(chat_endpoint, "build_llm", lambda *a, **k: StubProvider())
 
     resp = client.post("/chat", json={"messages": [{"role": "user", "content": "hi"}]})
     assert resp.status_code == 200

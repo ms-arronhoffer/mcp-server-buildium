@@ -52,6 +52,10 @@ class Completion:
 
     content: str = ""
     tool_calls: list[ToolCall] = field(default_factory=list)
+    #: Routing metadata set by :class:`~.router.ModelRouter` on the first call
+    #: of a turn. ``None`` for all other providers and subsequent rounds.
+    #: :func:`~.agent.run_chat` emits a ``"routing"`` SSE event when this is set.
+    routing_info: dict | None = None
 
 
 class LLMProvider(ABC):
@@ -105,7 +109,7 @@ def build_provider(
     from .providers import AnthropicProvider, GeminiProvider, OpenAIProvider
 
     provider = config.get_llm_provider()
-    if provider is None:
+    if provider is None or provider == "router":
         raise ValueError("No LLM provider configured (set BUILDIUM_LLM_PROVIDER)")
 
     key = config.get_active_llm_key() or ""
@@ -118,3 +122,33 @@ def build_provider(
         "gemini": GeminiProvider,
     }
     return classes[provider](api_key=key, model=chosen_model, base_url=base_url, client=client)
+
+
+def build_llm(
+    config: BuildiumConfig,
+    *,
+    model: str | None = None,
+    client: httpx.AsyncClient | None = None,
+) -> LLMProvider:
+    """Return the appropriate LLM provider or :class:`~.router.ModelRouter`.
+
+    This is the preferred factory for the ``/chat`` endpoint. It transparently
+    delegates to :func:`build_provider` (single-provider mode) or
+    :func:`.router.build_router` (when ``BUILDIUM_LLM_ROUTER_ENABLED=true``).
+
+    Args:
+        config: Server configuration with LLM settings populated.
+        model: Optional model to pin (e.g. from the ``/chat`` request body).
+            In router mode this selects the specific router entry whose model
+            matches; in single-provider mode this overrides the default model.
+        client: Optional shared ``httpx.AsyncClient`` (mainly for tests).
+
+    Raises:
+        ValueError: when no LLM is configured.
+    """
+    if config.llm_router_enabled:
+        from .router import build_router
+
+        pinned = model or None
+        return build_router(config, pinned_model=pinned, client=client)
+    return build_provider(config, model=model, client=client)
