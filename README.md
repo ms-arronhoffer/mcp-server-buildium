@@ -11,7 +11,7 @@
 ## Features
 
 * 🔐 **API Key Authentication** - Secure server-to-server authentication via headers
-* 🏘️ **160 Tools Across 22 Categories** - Comprehensive property management coverage
+* 🏘️ **168 Tools Across 23 Categories** - Comprehensive property management coverage
 * 💸 **Month-End Close Automation** - Post rent, apply payments oldest-first, assess late fees, and produce owner statements in one instruction (dry-run by default)
 * 🔔 **Proactive Alerts & Digest** - A rules layer for scheduled, push-style intelligence (lease expirations, late rent, low reserves, aging work orders)
 * 📊 **Trustworthy Financial Reports** - Deterministic, reconciled rent roll, aged receivables, and P&L with branded PDF/XLSX/CSV export
@@ -96,10 +96,11 @@ Control which tool categories are enabled using the `BUILDIUM_CATEGORIES` enviro
 | `reports` | 3 | Deterministic, reconciled financial reports (rent roll, aged receivables, income statement) with branded PDF/XLSX/CSV export |
 | `close` | 1 | Month-end "close my books" automation (post rent, apply payments oldest-first, assess late fees, owner statements) |
 | `alerts` | 1 | Proactive portfolio intelligence — scheduled alerts & daily digest (lease expirations, late rent, low bank reserve, aging work orders) |
+| `analytics` | 8 | Deep-analysis & opportunity surfacing (budget variance, vacancy analysis, rent trend, vendor spend, cash flow projection, maintenance ROI, owner distribution, delinquency trend) |
 
-**Total: 160 category tools + built-in `health_check` and `audit_summary` tools (162 total).**
+**Total: 168 category tools + built-in `health_check` and `audit_summary` tools (170 total).**
 
-If `BUILDIUM_CATEGORIES` is not set, all 160 tools across all 22 categories are enabled.
+If `BUILDIUM_CATEGORIES` is not set, all 168 tools across all 23 categories are enabled.
 
 ### Security, Roles & Audit
 
@@ -436,9 +437,9 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 }
 ```
 
-## Available Tools (160 category tools)
+## Available Tools (168 category tools)
 
-> In addition to the 160 category tools below, the server exposes two built-in
+> In addition to the 168 category tools below, the server exposes two built-in
 > tools that are always registered regardless of the active category set:
 >
 > * **`health_check`** — Returns the server version, uptime, active transport,
@@ -448,7 +449,7 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 >   counts by tool and outcome, error rate, recent mutations, recent denials)
 >   over MCP. Requires `BUILDIUM_AUDIT_SINK=file`.
 >
-> Total: 160 category tools + 2 built-in = **162 tools**.
+> Total: 168 category tools + 2 built-in = **170 tools**.
 
 ### Associations (6 tools)
 * `list_associations` - List all associations

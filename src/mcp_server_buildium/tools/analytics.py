@@ -28,6 +28,18 @@ from ..llm.artifacts import SUPPORTED_FORMATS, Section, add_current_artifact, bu
 from . import _common as c
 from . import _money as m
 
+# Average days per month used for daily-rate calculations (365.25 / 12).
+_DAYS_PER_MONTH: float = 30.44
+
+# All work-order statuses in Buildium (used to fan-out paginated queries).
+_WORK_ORDER_STATUSES: tuple[str, ...] = (
+    "New",
+    "InProgress",
+    "Completed",
+    "Deferred",
+    "Closed",
+)
+
 _EXPORT_FORMATS = {"csv", "xlsx", "pdf"}
 
 
@@ -452,7 +464,7 @@ def register_analytics_tools(mcp: FastMCP, client: BuildiumClient) -> None:
                 days_vacant = m.days_between(end, as_of) if end else None
                 monthly_rent = last_rent.get(uid, 0.0)
                 annualized_loss = round(monthly_rent * 12, m.CENTS)
-                daily_loss = round(monthly_rent / 30.44, m.CENTS) if monthly_rent else 0.0
+                daily_loss = round(monthly_rent / _DAYS_PER_MONTH, m.CENTS) if monthly_rent else 0.0
                 estimated_loss = (
                     round(daily_loss * days_vacant, m.CENTS) if days_vacant is not None else None
                 )
@@ -995,9 +1007,8 @@ def register_analytics_tools(mcp: FastMCP, client: BuildiumClient) -> None:
 
             # Work order costs by property.
             wo_cost_by_prop: dict[Any, float] = {}
-            open_statuses = ("New", "InProgress", "Completed", "Deferred", "Closed")
             seen_wo: set[Any] = set()
-            for status in open_statuses:
+            for status in _WORK_ORDER_STATUSES:
 
                 def _wo_page(limit: int, offset: int, _s: str = status) -> Any:
                     kwargs: dict[str, Any] = {"statuses": [_s], "limit": limit, "offset": offset}

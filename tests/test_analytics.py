@@ -288,7 +288,7 @@ async def test_vacancy_analysis_future_lease_sets_next_occupancy() -> None:
     units = [{"Id": 200, "PropertyId": 20, "UnitNumber": "2A"}]
     leases = {
         "Active": [],
-        "Past": [{"Id": 3, "UnitId": 200, "PropertyId": 20, "Rent": 1000.0, "LeaseToDate": "2026-06-01"}],
+        "Past": [{"Id": 3, "UnitId": 200, "PropertyId": 20, "AccountDetails": {"Rent": 1000.0}, "LeaseToDate": "2026-06-01"}],
         "Future": [{"Id": 4, "UnitId": 200, "PropertyId": 20, "LeaseFromDate": "2026-08-01"}],
     }
     client = _AnalyticsClient(
