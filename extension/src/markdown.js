@@ -65,7 +65,9 @@ export function parseInline(text) {
         return { type: "text", value: m[1] };
       },
     },
-    { re: /^\*\*([^*]+)\*\*/, make: (m) => ({ type: "bold", value: m[1] }) },
+    // Bold content is parsed recursively so nested links/action links keep
+    // working (the assistant often emits `**[Label](action:…)**`).
+    { re: /^\*\*([^*]+)\*\*/, make: (m) => ({ type: "bold", children: parseInline(m[1]) }) },
     { re: /^`([^`]+)`/, make: (m) => ({ type: "code", value: m[1] }) },
   ];
 
@@ -96,6 +98,11 @@ export function parseInline(text) {
 function firstAction(tokens) {
   for (const t of tokens) {
     if (t.type === "action") return t.prompt;
+    // Action links may be nested inside bold, e.g. `**[Label](action:…)**`.
+    if (t.children) {
+      const nested = firstAction(t.children);
+      if (nested) return nested;
+    }
   }
   return null;
 }
@@ -216,7 +223,7 @@ function renderInline(tokens, parent, onAction) {
       parent.appendChild(document.createTextNode(t.value));
     } else if (t.type === "bold") {
       const el = document.createElement("strong");
-      el.textContent = t.value;
+      renderInline(t.children, el, onAction);
       parent.appendChild(el);
     } else if (t.type === "code") {
       const el = document.createElement("code");
