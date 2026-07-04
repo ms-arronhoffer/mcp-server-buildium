@@ -57,11 +57,12 @@ const artifactUrls = new ArtifactUrlStore();
 const PANEL_PREFS_KEY = "buildium_sidepanel_prefs";
 const MAX_RECENT_PROMPTS = 5;
 const MAX_INSIGHTS = 4;
+// UX cap to keep requests concise and avoid overwhelming the assistant context.
 const MAX_PROMPT_CHARS = 2000;
 const QUICK_PROMPTS = [
-  "Show me today's highest-priority alerts.",
-  "Summarize leases with upcoming expirations in the next 60 days.",
-  "Draft tenant follow-up messages for overdue balances.",
+  { label: "Priority alerts", prompt: "Show me today's highest-priority alerts." },
+  { label: "Expiring leases", prompt: "Summarize leases with upcoming expirations in the next 60 days." },
+  { label: "Tenant follow-up", prompt: "Draft tenant follow-up messages for overdue balances." },
 ];
 
 const panelPrefs = {
@@ -74,6 +75,7 @@ const panelPrefs = {
 
 let lastAttempt = "";
 let clearedSnapshot = null;
+let prefsSaveTimer = null;
 
 const attachmentController = new AttachmentController(els.attachments, (text, isError) =>
   showBanner(els.banner, text, isError),
@@ -112,6 +114,13 @@ async function savePanelPrefs() {
   await api.storage.local.set({ [PANEL_PREFS_KEY]: panelPrefs });
 }
 
+function scheduleSavePanelPrefs(delay = 250) {
+  if (prefsSaveTimer) window.clearTimeout(prefsSaveTimer);
+  prefsSaveTimer = window.setTimeout(() => {
+    savePanelPrefs().catch(() => undefined);
+  }, delay);
+}
+
 function renderOnboarding() {
   els.onboarding.classList.toggle("hidden", panelPrefs.onboardingDismissed);
 }
@@ -144,6 +153,20 @@ function renderViewControls() {
   for (const btn of els.viewControls.querySelectorAll(".view-btn")) {
     btn.classList.toggle("active", btn.dataset.view === view);
   }
+}
+
+function renderQuickActions() {
+  els.quickActions.innerHTML = "";
+  QUICK_PROMPTS.forEach((item, idx) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "quick-action";
+    btn.dataset.prompt = item.prompt;
+    btn.textContent = item.label;
+    btn.setAttribute("aria-keyshortcuts", `Alt+${idx + 1}`);
+    btn.title = `Alt+${idx + 1}`;
+    els.quickActions.appendChild(btn);
+  });
 }
 
 function applyViewFilter() {
@@ -179,7 +202,7 @@ async function updateComposerValidation() {
   setComposerError(error);
   els.send.disabled = !!error || chatState.state !== CHAT_STATES.IDLE;
   panelPrefs.draft = els.input.value;
-  await savePanelPrefs();
+  scheduleSavePanelPrefs();
 }
 
 function addInsight(text, tone = "neutral") {
@@ -212,13 +235,17 @@ function showToast(message, actionLabel, action) {
 }
 
 function clearChatWithUndo() {
-  clearedSnapshot = { html: els.messages.innerHTML, history: [...history] };
-  els.messages.innerHTML = '<div class="empty">Conversation cleared. Use quick actions above to start again.</div>';
+  const nodes = Array.from(els.messages.childNodes);
+  clearedSnapshot = { nodes, history: [...history] };
+  const empty = document.createElement("div");
+  empty.className = "empty";
+  empty.textContent = "Conversation cleared. Use quick actions above to start again.";
+  els.messages.replaceChildren(empty);
   history.splice(0, history.length);
   applyViewFilter();
   showToast("Conversation cleared.", "Undo", () => {
     if (!clearedSnapshot) return;
-    els.messages.innerHTML = clearedSnapshot.html;
+    els.messages.replaceChildren(...clearedSnapshot.nodes);
     history.splice(0, history.length, ...clearedSnapshot.history);
     clearedSnapshot = null;
     applyViewFilter();
@@ -504,7 +531,7 @@ window.addEventListener("keydown", (event) => {
   const idx = Number(event.key) - 1;
   if (idx < 0 || idx >= QUICK_PROMPTS.length) return;
   event.preventDefault();
-  const prompt = QUICK_PROMPTS[idx];
+  const prompt = QUICK_PROMPTS[idx].prompt;
   els.input.value = prompt;
   els.input.dispatchEvent(new Event("input"));
   els.form.requestSubmit();
@@ -528,6 +555,7 @@ api.runtime.onMessage.addListener((message) => {
 
 function cleanupPanelLifecycle() {
   artifactUrls.revokeAll();
+  // Panel-close notifications are best-effort; ignore failures when runtime is unavailable.
   api.runtime.sendMessage({ type: "panel_closed" }).catch(() => undefined);
 }
 
@@ -539,6 +567,7 @@ async function init() {
   renderOnboarding();
   renderInsightsCollapsed();
   renderRecentPrompts();
+  renderQuickActions();
   renderViewControls();
   els.input.value = panelPrefs.draft || "";
   els.input.dispatchEvent(new Event("input"));

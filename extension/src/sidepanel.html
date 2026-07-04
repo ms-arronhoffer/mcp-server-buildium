@@ -44,11 +44,7 @@
         <ul id="insights-list" class="insights-list" aria-live="polite">
           <li class="insight neutral">No alerts yet. Your next update will appear here.</li>
         </ul>
-        <div id="quick-actions" class="quick-actions" role="group" aria-label="Quick actions">
-          <button type="button" class="quick-action" data-prompt="Show me today's highest-priority alerts.">Priority alerts</button>
-          <button type="button" class="quick-action" data-prompt="Summarize leases with upcoming expirations in the next 60 days.">Expiring leases</button>
-          <button type="button" class="quick-action" data-prompt="Draft tenant follow-up messages for overdue balances.">Tenant follow-up</button>
-        </div>
+        <div id="quick-actions" class="quick-actions" role="group" aria-label="Quick actions"></div>
         <div id="view-controls" class="view-controls" role="group" aria-label="Message view filter">
           <button type="button" class="view-btn active" data-view="all">All</button>
           <button type="button" class="view-btn" data-view="alerts">Alerts</button>
@@ -81,7 +77,7 @@
         </div>
         <div class="composer-meta">
           <span id="composer-error" class="composer-error hidden" role="alert"></span>
-          <span id="composer-hint" class="composer-hint">Enter to send • Shift+Enter for newline</span>
+          <span id="composer-hint" class="composer-hint">Enter to send • Shift+Enter newline • Alt+1/2/3 quick actions</span>
         </div>
       </form>
     </div>
