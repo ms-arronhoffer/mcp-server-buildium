@@ -9,10 +9,24 @@ describe("parseInline", () => {
   it("parses bold and inline code", () => {
     expect(parseInline("a **bold** and `code` bit")).toEqual([
       { type: "text", value: "a " },
-      { type: "bold", value: "bold" },
+      { type: "bold", children: [{ type: "text", value: "bold" }] },
       { type: "text", value: " and " },
       { type: "code", value: "code" },
       { type: "text", value: " bit" },
+    ]);
+  });
+
+  it("parses an action link nested inside bold", () => {
+    // The assistant commonly emits `**[Label](action:…)**`; the link inside the
+    // bold must still be tokenized as an action rather than shown as literal text.
+    const tokens = parseInline("**[Task 11](action:Show full details for task 11)**");
+    expect(tokens).toEqual([
+      {
+        type: "bold",
+        children: [
+          { type: "action", label: "Task 11", prompt: "Show full details for task 11" },
+        ],
+      },
     ]);
   });
 
@@ -53,6 +67,14 @@ describe("parseMarkdown", () => {
     expect(blocks[0].type).toBe("list");
     expect(blocks[0].items[0].action).toBe("Show details for lease 1");
     expect(blocks[0].items[1].action).toBeNull();
+  });
+
+  it("detects action links nested inside bold list items", () => {
+    const blocks = parseMarkdown(
+      "- **[Task 11](action:Show full details for task 11)** — high priority",
+    );
+    expect(blocks[0].type).toBe("list");
+    expect(blocks[0].items[0].action).toBe("Show full details for task 11");
   });
 
   it("parses a GitHub-style table and extracts a per-row action", () => {
