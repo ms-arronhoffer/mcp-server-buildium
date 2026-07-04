@@ -16,6 +16,7 @@ from mcp_server_buildium.llm.attachments import (
     current_attachments,
     set_current_attachments,
 )
+from mcp_server_buildium.tools._common import list_tools_map
 from mcp_server_buildium.tools.documents import register_document_tools
 
 
@@ -47,7 +48,7 @@ def _build_server():
     client = _StubClient()
     mcp = FastMCP("test")
     register_document_tools(mcp, client)
-    tools = asyncio.run(mcp.get_tools())
+    tools = asyncio.run(list_tools_map(mcp))
     return client, tools
 
 

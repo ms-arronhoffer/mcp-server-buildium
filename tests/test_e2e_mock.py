@@ -19,6 +19,7 @@ from collections.abc import Iterator
 import pytest
 import uvicorn
 
+from mcp_server_buildium.tools._common import list_tools_map
 from mockapi.app import create_app
 from mockapi.db import SessionLocal, reset_db
 from mockapi.seed import seed_all
@@ -113,7 +114,7 @@ def tools(mock_server: str, event_loop):
     mcp = FastMCP("e2e")
     for register in _CATEGORY_REGISTRARS.values():
         register(mcp, client)
-    tool_map = {t.name: t for t in event_loop.run_until_complete(mcp.get_tools()).values()}
+    tool_map = {t.name: t for t in event_loop.run_until_complete(list_tools_map(mcp)).values()}
     return tool_map
 
 
@@ -228,7 +229,7 @@ def test_readonly_policy_blocks_mutations_e2e(mock_server, event_loop):
     )
     for register in _CATEGORY_REGISTRARS.values():
         register(guarded, client)
-    tool_map = {t.name: t for t in event_loop.run_until_complete(guarded.get_tools()).values()}
+    tool_map = {t.name: t for t in event_loop.run_until_complete(list_tools_map(guarded)).values()}
 
     # Reads remain available and functional against the mock.
     assert "list_leases" in tool_map

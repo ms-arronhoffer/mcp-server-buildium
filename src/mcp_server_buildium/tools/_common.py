@@ -42,6 +42,34 @@ except Exception:  # pragma: no cover - only hit if pydantic is unavailable
 logger = get_logger("mcp_server_buildium.tools")
 
 
+async def list_tools_map(mcp: Any) -> dict[str, Any]:
+    """Return the server's registered tools as a ``{name: tool}`` mapping.
+
+    FastMCP 3.x removed the 2.x ``get_tools()`` dict accessor in favor of
+    ``list_tools()`` (which returns a sequence and, by default, applies the
+    per-request list middleware). This helper restores the unfiltered mapping the
+    server and tests relied on. The older ``get_tools()`` path is kept as a
+    fallback so the code also works against FastMCP 2.x.
+    """
+    if hasattr(mcp, "get_tools"):  # FastMCP 2.x compatibility
+        return await mcp.get_tools()
+    tools = await mcp.list_tools(run_middleware=False)
+    return {tool.name: tool for tool in tools}
+
+
+async def list_resources_map(mcp: Any) -> dict[str, Any]:
+    """Return the server's registered resources as a ``{uri: resource}`` mapping.
+
+    Mirrors :func:`list_tools_map` for resources, bridging the FastMCP 3.x
+    ``list_resources()`` sequence API and the removed 2.x ``get_resources()``
+    dict accessor.
+    """
+    if hasattr(mcp, "get_resources"):  # FastMCP 2.x compatibility
+        return await mcp.get_resources()
+    resources = await mcp.list_resources(run_middleware=False)
+    return {str(resource.uri): resource for resource in resources}
+
+
 def _env_int(name: str, default: int) -> int:
     """Read a positive integer from the environment, falling back to ``default``."""
     raw = os.getenv(name)

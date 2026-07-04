@@ -16,6 +16,7 @@ import pytest
 from fastmcp import FastMCP
 
 from mcp_server_buildium.llm import artifacts
+from mcp_server_buildium.tools._common import list_tools_map
 from mcp_server_buildium.tools.analytics import register_analytics_tools
 
 
@@ -25,7 +26,7 @@ from mcp_server_buildium.tools.analytics import register_analytics_tools
 async def _get_tool(client: Any, name: str) -> Any:
     mcp = FastMCP("test")
     register_analytics_tools(mcp, client)
-    tools = await mcp.get_tools()
+    tools = await list_tools_map(mcp)
     return tools[name]
 
 

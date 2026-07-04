@@ -9,6 +9,7 @@ from fastmcp import FastMCP
 from mcp_server_buildium import audit
 from mcp_server_buildium.security.policy import RateLimiter, ToolPolicy
 from mcp_server_buildium.security.registration import GuardedMCP
+from mcp_server_buildium.tools._common import list_tools_map
 
 
 def _build(policy: ToolPolicy, recorder=None, limiter=None):
@@ -25,7 +26,7 @@ def _build(policy: ToolPolicy, recorder=None, limiter=None):
         """A write tool."""
         return {"data": {"name": name}, "count": None, "error": None, "meta": None}
 
-    tools = asyncio.run(mcp.get_tools())
+    tools = asyncio.run(list_tools_map(mcp))
     return mcp, tools
 
 
