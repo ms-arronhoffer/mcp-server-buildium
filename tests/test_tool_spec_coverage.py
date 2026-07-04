@@ -137,6 +137,7 @@ def test_operation_mappings_are_unique(tool_operations: dict[str, str]) -> None:
 
 
 def _request_body_schema_name(operation: dict) -> str | None:
+    """Return the request-body schema class name for an OpenAPI operation, if any."""
     request_body = operation.get("requestBody")
     if not isinstance(request_body, dict):
         return None
@@ -150,6 +151,7 @@ def _request_body_schema_name(operation: dict) -> str | None:
 
 
 def _schema_name(schema: object) -> str | None:
+    """Resolve the first component-schema class name referenced by ``schema``."""
     if not isinstance(schema, dict):
         return None
     ref = schema.get("$ref")
@@ -165,6 +167,12 @@ def _schema_name(schema: object) -> str | None:
 
 
 def _tool_request_models() -> dict[str, tuple[str, str]]:
+    """Collect ``tool_name -> (sdk_module, sdk_class)`` request-model references.
+
+    The registry is built by AST-parsing the tool modules and recording the SDK
+    model referenced by each write tool via ``c.create(...)``,
+    ``c.build_model(...)``, or a direct generated-model constructor call.
+    """
     request_models: dict[str, tuple[str, str]] = {}
     for path in TOOLS_PATH.glob("*.py"):
         tree = ast.parse(path.read_text())
