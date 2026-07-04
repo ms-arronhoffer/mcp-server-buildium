@@ -32,6 +32,7 @@ from .security.policy import effective_policy_for_claims
 from .tools._common import list_tools_map
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
+    import httpx
     from fastmcp.server.auth.auth import TokenVerifier
 
     from .config import BuildiumConfig
@@ -130,14 +131,15 @@ def register_chat_routes(
     # sockets/file descriptors until the server stops responding. The client is
     # created lazily on first use and reused for the process lifetime; httpx
     # ``AsyncClient`` instances are safe for concurrent use.
-    shared_client: dict[str, Any] = {"client": None}
+    shared_client: httpx.AsyncClient | None = None
 
-    def _get_shared_client() -> Any:
+    def _get_shared_client() -> httpx.AsyncClient:
         import httpx
 
-        if shared_client["client"] is None:
-            shared_client["client"] = httpx.AsyncClient(timeout=60.0)
-        return shared_client["client"]
+        nonlocal shared_client
+        if shared_client is None:
+            shared_client = httpx.AsyncClient(timeout=60.0)
+        return shared_client
 
     # When an Entra App Role map is configured (with Entra auth), each chat turn
     # only advertises/executes tools the caller's role permits.
