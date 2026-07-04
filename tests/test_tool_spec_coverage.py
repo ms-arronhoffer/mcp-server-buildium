@@ -191,6 +191,7 @@ def _tool_request_models() -> dict[str, tuple[str, str]]:
                             imported_models[alias.asname or alias.name] = (module, alias.name)
 
         class RequestModelCollector(ast.NodeVisitor):
+            # ast.NodeVisitor requires visitor names to match AST node class names.
             def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:  # noqa: N802
                 if not node.name.startswith(("create_", "update_")):
                     self.generic_visit(node)
