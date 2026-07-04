@@ -190,41 +190,45 @@ def _tool_request_models() -> dict[str, tuple[str, str]]:
                         for alias in stmt.names:
                             imported_models[alias.asname or alias.name] = (module, alias.name)
 
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.AsyncFunctionDef):
-                continue
-            model: tuple[str, str] | None = None
-            for sub in ast.walk(node):
-                if not isinstance(sub, ast.Call):
-                    continue
-                if (
-                    isinstance(sub.func, ast.Attribute)
-                    and isinstance(sub.func.value, ast.Name)
-                    and sub.func.value.id == "c"
-                    and sub.func.attr == "create"
-                    and len(sub.args) >= 3
-                    and all(
-                        isinstance(sub.args[i], ast.Constant) and isinstance(sub.args[i].value, str)
-                        for i in (1, 2)
-                    )
-                ):
-                    model = (sub.args[1].value, sub.args[2].value)
-                elif (
-                    isinstance(sub.func, ast.Attribute)
-                    and isinstance(sub.func.value, ast.Name)
-                    and sub.func.value.id == "c"
-                    and sub.func.attr == "build_model"
-                    and len(sub.args) >= 2
-                    and all(
-                        isinstance(sub.args[i], ast.Constant) and isinstance(sub.args[i].value, str)
-                        for i in (0, 1)
-                    )
-                ):
-                    model = (sub.args[0].value, sub.args[1].value)
-                elif isinstance(sub.func, ast.Name) and sub.func.id in imported_models:
-                    model = imported_models[sub.func.id]
-            if model is not None:
-                request_models[node.name] = model
+        class RequestModelCollector(ast.NodeVisitor):
+            def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:  # noqa: N802
+                model: tuple[str, str] | None = None
+                for sub in ast.walk(node):
+                    if not isinstance(sub, ast.Call):
+                        continue
+                    if (
+                        isinstance(sub.func, ast.Attribute)
+                        and isinstance(sub.func.value, ast.Name)
+                        and sub.func.value.id == "c"
+                        and sub.func.attr == "create"
+                        and len(sub.args) >= 3
+                        and all(
+                            isinstance(sub.args[i], ast.Constant)
+                            and isinstance(sub.args[i].value, str)
+                            for i in (1, 2)
+                        )
+                    ):
+                        model = (sub.args[1].value, sub.args[2].value)
+                    elif (
+                        isinstance(sub.func, ast.Attribute)
+                        and isinstance(sub.func.value, ast.Name)
+                        and sub.func.value.id == "c"
+                        and sub.func.attr == "build_model"
+                        and len(sub.args) >= 2
+                        and all(
+                            isinstance(sub.args[i], ast.Constant)
+                            and isinstance(sub.args[i].value, str)
+                            for i in (0, 1)
+                        )
+                    ):
+                        model = (sub.args[0].value, sub.args[1].value)
+                    elif isinstance(sub.func, ast.Name) and sub.func.id in imported_models:
+                        model = imported_models[sub.func.id]
+                if model is not None:
+                    request_models[node.name] = model
+                self.generic_visit(node)
+
+        RequestModelCollector().visit(tree)
     return request_models
 
 
