@@ -885,10 +885,10 @@ def register_analytics_tools(mcp: FastMCP, client: BuildiumClient) -> None:
                 m.CENTS,
             )
 
-            # Rolling projected balances.
+            # Rolling projected balances. Each horizon adds one more month of
+            # scheduled inflow and subtracts that horizon's incremental bill
+            # outflow bucket, so the per-month ``inflow_30`` is applied cumulatively.
             inflow_30 = monthly_inflow  # ~1 month
-            inflow_60 = round(monthly_inflow * 2, m.CENTS)
-            inflow_90 = round(monthly_inflow * 3, m.CENTS)
 
             proj_30 = round(current_balance + inflow_30 - outflow["30"], m.CENTS)
             proj_60 = round(proj_30 + inflow_30 - outflow["60"], m.CENTS)
