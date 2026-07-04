@@ -123,6 +123,15 @@ def _ok(result: dict) -> dict:
     return result
 
 
+def _create_tool_kwargs(tool_name: str, payload: dict) -> dict[str, dict]:
+    payload_arg = {
+        "create_rental_unit": "unit_data",
+        "create_association_unit": "unit_data",
+        "create_task_category": "category_data",
+    }[tool_name]
+    return {payload_arg: payload}
+
+
 @pytest.mark.parametrize(
     ("tool_name", "kwargs", "min_count"),
     [
@@ -299,7 +308,7 @@ def test_partial_bank_account_update(tools, run):
     ],
 )
 def test_create_tools_enforce_openapi_required_fields(tools, run, tool_name, payload, field_name):
-    result = run(tools[tool_name].fn(**{"unit_data": payload} if "unit" in tool_name else {"category_data": payload}))
+    result = run(tools[tool_name].fn(**_create_tool_kwargs(tool_name, payload)))
     assert result["error"] is not None
     assert result["error"]["code"] == "validation_error"
     assert field_name in result["error"]["message"]
