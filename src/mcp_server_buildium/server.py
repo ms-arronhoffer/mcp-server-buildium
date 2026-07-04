@@ -26,6 +26,7 @@ from .tools.communications import register_communication_tools
 from .tools.documents import register_document_tools
 from .tools.files import register_file_tools
 from .tools.general_ledger import register_general_ledger_tools
+from .tools.intelligence import register_intelligence_tools
 from .tools.leases import register_lease_tools
 from .tools.owners import register_owner_tools
 from .tools.ownership_accounts import register_ownership_account_tools
@@ -102,6 +103,7 @@ _CATEGORY_REGISTRARS = {
     "close": register_close_tools,
     "alerts": register_alert_tools,
     "analytics": register_analytics_tools,
+    "intelligence": register_intelligence_tools,
 }
 
 for _category, _register in _CATEGORY_REGISTRARS.items():
