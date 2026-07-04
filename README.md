@@ -11,8 +11,9 @@
 ## Features
 
 * 🔐 **API Key Authentication** - Secure server-to-server authentication via headers
-* 🏘️ **160 Tools Across 22 Categories** - Comprehensive property management coverage
+* 🏘️ **161 Tools Across 23 Categories** - Comprehensive property management coverage
 * 💸 **Month-End Close Automation** - Post rent, apply payments oldest-first, assess late fees, and produce owner statements in one instruction (dry-run by default)
+* 🏦 **Owner Distribution Automation** - Compute distributable owner funds per property from collected cash, net of unpaid bills and a retained reserve, reconciled and exportable
 * 🔔 **Proactive Alerts & Digest** - A rules layer for scheduled, push-style intelligence (lease expirations, late rent, low reserves, aging work orders)
 * 📊 **Trustworthy Financial Reports** - Deterministic, reconciled rent roll, aged receivables, and P&L with branded PDF/XLSX/CSV export
 * 📋 **Selective Tool Loading** - Enable only the categories you need
@@ -91,10 +92,11 @@ Control which tool categories are enabled using the `BUILDIUM_CATEGORIES` enviro
 | `reports` | 3 | Deterministic, reconciled financial reports (rent roll, aged receivables, income statement) with branded PDF/XLSX/CSV export |
 | `close` | 1 | Month-end "close my books" automation (post rent, apply payments oldest-first, assess late fees, owner statements) |
 | `alerts` | 1 | Proactive portfolio intelligence — scheduled alerts & daily digest (lease expirations, late rent, low bank reserve, aging work orders) |
+| `distributions` | 1 | Owner distribution automation — distributable owner funds per property from collected cash, net of unpaid bills and a retained reserve, reconciled & exportable |
 
-**Total: 160 category tools + built-in `health_check` and `audit_summary` tools (162 total).**
+**Total: 161 category tools + built-in `health_check` and `audit_summary` tools (163 total).**
 
-If `BUILDIUM_CATEGORIES` is not set, all 160 tools across all 22 categories are enabled.
+If `BUILDIUM_CATEGORIES` is not set, all 161 tools across all 23 categories are enabled.
 
 ### Security, Roles & Audit
 
@@ -353,10 +355,10 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 }
 ```
 
-## Available Tools (160 category tools)
+## Available Tools (161 category tools)
 
-> In addition to the 160 category tools below, the server exposes two built-in
-> tools: `health_check` and `audit_summary` (admin-only), for a total of 162.
+> In addition to the 161 category tools below, the server exposes two built-in
+> tools: `health_check` and `audit_summary` (admin-only), for a total of 163.
 
 ### Associations (6 tools)
 * `list_associations` - List all associations
@@ -544,6 +546,10 @@ download traceable back to source transactions.
 ### Alerts (1 tool)
 
 * `portfolio_alerts` - Proactive rules layer that scans the portfolio and returns prioritised alerts plus a human-readable daily digest: leases expiring with no renewal, late rent, bank accounts below reserve, and aging work orders. Point a scheduler (cron/task runner) at it for push-style intelligence. Optional `csv`/`xlsx`/`pdf` export.
+
+### Distributions (1 tool)
+
+* `owner_distributions` - The natural follow-on to the month-end close: computes distributable owner funds per property from the cash collected against active leases, nets out approved unpaid vendor bills, holds back a retained reserve (flat amount or percent of collected), and floors the result at zero. Every figure is computed in code, `reconciled` so the parts sum to the whole, and traceable back to the contributing lease and bill ids. Optional `csv`/`xlsx`/`pdf` owner-distribution statement export. Read-only (it plans the distribution rather than moving money) *(sensitive)*
 
 ## Tool Request/Response Examples
 
@@ -787,6 +793,10 @@ Create a new lease agreement.
 > "Create a new lease for property 100, unit 205"
 
 > "List all associations"
+
+> "Run the July close for the Elm St portfolio (dry run)"
+
+> "How much can I distribute to each owner this month, holding back a 10% reserve?"
 
 ## Development
 

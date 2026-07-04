@@ -330,6 +330,41 @@ class IncomeStatement:
         )
 
 
+def distributable_amount(
+    collected: Any,
+    unpaid_bills: Any = 0.0,
+    reserve_amount: Any | None = None,
+    reserve_percent: Any | None = None,
+) -> tuple[float, float]:
+    """Compute an owner's distributable cash and the reserve withheld.
+
+    The rule every property manager applies before an owner draw: take the cash
+    collected for the period, subtract the property's unpaid bills, then hold back
+    a reserve (either a flat amount or a percent of what was collected). The
+    remainder is what can safely be distributed to the owner. The distributable
+    figure is floored at zero — you never distribute more cash than is on hand.
+
+    Args:
+        collected: Cash collected (payments/credits) for the period.
+        unpaid_bills: Approved-but-unpaid bill total to net out first.
+        reserve_amount: Flat reserve to retain (mutually exclusive with percent).
+        reserve_percent: Reserve as a percent (0-100) of ``collected``.
+
+    Returns:
+        ``(distributable, reserve_withheld)`` — both rounded to cents.
+    """
+    collected_c = money(collected)
+    bills_c = money(unpaid_bills)
+    if reserve_amount is not None:
+        reserve = money(reserve_amount)
+    elif reserve_percent is not None:
+        reserve = money(collected_c * to_float(reserve_percent) / 100.0)
+    else:
+        reserve = 0.0
+    distributable = round(collected_c - bills_c - reserve, CENTS)
+    return max(0.0, distributable), reserve
+
+
 def build_income_statement(transactions: list[dict[str, Any]]) -> IncomeStatement:
     """Aggregate GL transactions into a reconciled income statement.
 
