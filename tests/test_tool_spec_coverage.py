@@ -7,8 +7,8 @@ offline (no credentials, no network) by introspecting the FastMCP server.
 
 from __future__ import annotations
 
-import asyncio
 import ast
+import asyncio
 import importlib
 import json
 import subprocess

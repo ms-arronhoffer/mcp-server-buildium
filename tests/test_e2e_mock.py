@@ -318,6 +318,8 @@ def test_create_tools_enforce_openapi_required_fields(tools, run, tool_name, pay
                         "AddressLine1": "500 Elm Street",
                         "City": "Springfield",
                         "State": "IL",
+                        "PostalCode": "62701",
+                        "Country": "UnitedStates",
                     },
                 }
             },
@@ -334,6 +336,8 @@ def test_create_tools_enforce_openapi_required_fields(tools, run, tool_name, pay
                         "AddressLine1": "700 Oak Avenue",
                         "City": "Springfield",
                         "State": "IL",
+                        "PostalCode": "62701",
+                        "Country": "UnitedStates",
                     },
                 }
             },
