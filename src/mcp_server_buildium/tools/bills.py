@@ -83,6 +83,17 @@ def register_bill_tools(mcp: FastMCP, client: BuildiumClient) -> None:
             api = client.bills_api
             current = await api.external_api_bills_get_bill_by_id(bill_id=bill_id)
             merged = c.merge_update(current, bill_data)
+            # Bill GET returns each line's GL account as a ``GLAccount`` lookup
+            # object, but the PUT line item wants a scalar ``GlAccountId``. Reduce
+            # the lookup on every line so a partial edit round-trips cleanly.
+            lines = merged.get("Lines")
+            if isinstance(lines, list):
+                merged["Lines"] = [
+                    c.reshape_lookup_ids(line, {"GLAccount": "GlAccountId"})
+                    if isinstance(line, dict)
+                    else line
+                    for line in lines
+                ]
             message = c.build_model("bill_put_message", "BillPutMessage", merged)
             return await api.external_api_bills_update_bill(
                 bill_id=bill_id, bill_put_message=message

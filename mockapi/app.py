@@ -54,15 +54,21 @@ def _require(doc: dict[str, Any] | None, what: str) -> dict[str, Any]:
     return doc
 
 
-# Buildium stores tenant phone numbers as a list of ``{Number, Type}`` entries,
-# but the create/update messages accept the keyed ``{Home, Work, Mobile, Fax}``
-# object form. The real API normalizes the object back into the list shape it
-# returns; mirror that here so PUT responses deserialize as ``TenantMessage``.
+# Buildium stores phone numbers as a list of ``{Number, Type}`` entries, but the
+# create/update messages accept the keyed ``{Home, Work, Mobile, Fax}`` object
+# form. The real API normalizes the object back into the list shape it returns;
+# mirror that here so PUT/POST responses deserialize as their ``*Message`` model.
+# This applies to every phone-carrying entity (tenants, owners, vendors,
+# applicants), all of which expose ``PhoneNumbers`` as a list on read.
 _PUT_PHONE_KEY_TO_TYPE = {"home": "Home", "work": "Office", "mobile": "Cell", "fax": "Fax"}
 
 
-def _normalize_tenant_phone_numbers(body: dict[str, Any]) -> dict[str, Any]:
-    """Convert a keyed ``PhoneNumbers`` object in ``body`` into Buildium's list form."""
+def _normalize_phone_numbers(body: dict[str, Any]) -> dict[str, Any]:
+    """Convert a keyed ``PhoneNumbers`` object in ``body`` into Buildium's list form.
+
+    A no-op unless ``PhoneNumbers`` is present as the keyed object form, so it is
+    safe to apply to any create/update route.
+    """
     phones = body.get("PhoneNumbers")
     if not isinstance(phones, dict):
         return body
@@ -151,7 +157,7 @@ def create_app() -> FastAPI:
 
     @app.post("/v1/rentals/owners", status_code=201)
     async def create_rental_owner(body: dict, db: Session = Depends(get_session)):
-        return store.create_doc(db, "rental_owners", body)
+        return store.create_doc(db, "rental_owners", _normalize_phone_numbers(body))
 
     @app.get("/v1/rentals/owners/{owner_id}")
     async def get_rental_owner(owner_id: int, db: Session = Depends(get_session)):
@@ -159,6 +165,7 @@ def create_app() -> FastAPI:
 
     @app.put("/v1/rentals/owners/{owner_id}")
     async def update_rental_owner(owner_id: int, body: dict, db: Session = Depends(get_session)):
+        body = _normalize_phone_numbers(body)
         return _require(store.update_doc(db, "rental_owners", owner_id, body), "Rental owner")
 
     # Dynamic property routes must be registered AFTER the static /rentals/units
@@ -210,7 +217,7 @@ def create_app() -> FastAPI:
 
     @app.post("/v1/leases/tenants", status_code=201)
     async def create_lease_tenant(body: dict, db: Session = Depends(get_session)):
-        return store.create_doc(db, "lease_tenants", body)
+        return store.create_doc(db, "lease_tenants", _normalize_phone_numbers(body))
 
     @app.get("/v1/leases/tenants/{tenant_id}")
     async def get_lease_tenant(tenant_id: int, db: Session = Depends(get_session)):
@@ -218,7 +225,7 @@ def create_app() -> FastAPI:
 
     @app.put("/v1/leases/tenants/{tenant_id}")
     async def update_lease_tenant(tenant_id: int, body: dict, db: Session = Depends(get_session)):
-        body = _normalize_tenant_phone_numbers(body)
+        body = _normalize_phone_numbers(body)
         return _require(store.update_doc(db, "lease_tenants", tenant_id, body), "Tenant")
 
     @app.get("/v1/leases/{lease_id}")
@@ -292,7 +299,7 @@ def create_app() -> FastAPI:
 
     @app.post("/v1/associations/owners", status_code=201)
     async def create_association_owner(body: dict, db: Session = Depends(get_session)):
-        return store.create_doc(db, "association_owners", body)
+        return store.create_doc(db, "association_owners", _normalize_phone_numbers(body))
 
     @app.get("/v1/associations/owners/{owner_id}")
     async def get_association_owner(owner_id: int, db: Session = Depends(get_session)):
@@ -302,6 +309,7 @@ def create_app() -> FastAPI:
     async def update_association_owner(
         owner_id: int, body: dict, db: Session = Depends(get_session)
     ):
+        body = _normalize_phone_numbers(body)
         return _require(
             store.update_doc(db, "association_owners", owner_id, body), "Association owner"
         )
@@ -319,7 +327,7 @@ def create_app() -> FastAPI:
 
     @app.post("/v1/associations/tenants", status_code=201)
     async def create_association_tenant(body: dict, db: Session = Depends(get_session)):
-        return store.create_doc(db, "association_tenants", body)
+        return store.create_doc(db, "association_tenants", _normalize_phone_numbers(body))
 
     @app.get("/v1/associations/tenants/{tenant_id}")
     async def get_association_tenant(tenant_id: int, db: Session = Depends(get_session)):
@@ -329,7 +337,7 @@ def create_app() -> FastAPI:
     async def update_association_tenant(
         tenant_id: int, body: dict, db: Session = Depends(get_session)
     ):
-        body = _normalize_tenant_phone_numbers(body)
+        body = _normalize_phone_numbers(body)
         return _require(
             store.update_doc(db, "association_tenants", tenant_id, body), "Association tenant"
         )
@@ -384,7 +392,7 @@ def create_app() -> FastAPI:
 
     @app.post("/v1/applicants", status_code=201)
     async def create_applicant(body: dict, db: Session = Depends(get_session)):
-        return store.create_doc(db, "applicants", body)
+        return store.create_doc(db, "applicants", _normalize_phone_numbers(body))
 
     @app.get("/v1/applicants/groups")
     async def list_applicant_groups(request: Request, db: Session = Depends(get_session)):
@@ -405,6 +413,7 @@ def create_app() -> FastAPI:
 
     @app.put("/v1/applicants/{applicant_id}")
     async def update_applicant(applicant_id: int, body: dict, db: Session = Depends(get_session)):
+        body = _normalize_phone_numbers(body)
         return _require(store.update_doc(db, "applicants", applicant_id, body), "Applicant")
 
     @app.get("/v1/applicants/{applicant_id}/applications")
@@ -456,7 +465,7 @@ def create_app() -> FastAPI:
 
     @app.post("/v1/vendors", status_code=201)
     async def create_vendor(body: dict, db: Session = Depends(get_session)):
-        return store.create_doc(db, "vendors", body, status="Active")
+        return store.create_doc(db, "vendors", _normalize_phone_numbers(body), status="Active")
 
     @app.get("/v1/vendors/categories")
     async def list_vendor_categories(request: Request, db: Session = Depends(get_session)):
@@ -481,6 +490,7 @@ def create_app() -> FastAPI:
 
     @app.put("/v1/vendors/{vendor_id}")
     async def update_vendor(vendor_id: int, body: dict, db: Session = Depends(get_session)):
+        body = _normalize_phone_numbers(body)
         return _require(store.update_doc(db, "vendors", vendor_id, body), "Vendor")
 
     # ------------------------------------------------------------------ Tasks

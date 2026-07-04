@@ -210,6 +210,75 @@ def test_partial_association_tenant_phone_update(tools, run):
     assert "555-101-2020" in numbers
 
 
+def test_partial_vendor_phone_update(tools, run):
+    """Adding a phone number to a vendor must round-trip as a list (see #issue).
+
+    Vendors expose ``PhoneNumbers`` as a list on read but accept the keyed object
+    form on write; the mock normalizes the object back into the list shape so the
+    update response deserializes as ``VendorMessage`` instead of erroring.
+    """
+    result = _ok(
+        run(
+            tools["update_vendor"].fn(
+                vendor_id=2, vendor_data={"phone_numbers": {"mobile": "6144445511"}}
+            )
+        )
+    )
+    assert result["data"]["CompanyName"] == "Vendor Co 2"
+    numbers = {p["Number"] for p in result["data"]["PhoneNumbers"]}
+    assert "6144445511" in numbers
+
+
+def test_partial_rental_owner_phone_update(tools, run):
+    """Rental owners accept the same partial phone update."""
+    result = _ok(
+        run(
+            tools["update_rental_owner"].fn(
+                owner_id=1, owner_data={"phone_numbers": {"mobile": "555-111-2222"}}
+            )
+        )
+    )
+    assert result["data"]["FirstName"] == "Owner1"
+    numbers = {p["Number"] for p in result["data"]["PhoneNumbers"]}
+    assert "555-111-2222" in numbers
+
+
+def test_partial_association_owner_phone_update(tools, run):
+    """Association owners require a PrimaryAddress on write, preserved from read."""
+    result = _ok(
+        run(
+            tools["update_association_owner"].fn(
+                owner_id=1, owner_data={"phone_numbers": {"mobile": "555-111-3333"}}
+            )
+        )
+    )
+    assert result["data"]["FirstName"] == "AssocOwner1"
+    numbers = {p["Number"] for p in result["data"]["PhoneNumbers"]}
+    assert "555-111-3333" in numbers
+
+
+def test_partial_work_order_update(tools, run):
+    """Work order partial edits preserve the required EntryAllowed/VendorId."""
+    result = _ok(
+        run(tools["update_work_order"].fn(work_order_id=1, work_order_data={"VendorNotes": "hi"}))
+    )
+    assert result["error"] is None
+
+
+def test_partial_bill_update(tools, run):
+    """Bill partial edits reshape each line's GLAccount lookup into GlAccountId."""
+    result = _ok(run(tools["update_bill"].fn(bill_id=1, bill_data={"Memo": "updated"})))
+    assert result["data"]["Memo"] == "updated"
+
+
+def test_partial_bank_account_update(tools, run):
+    """Bank account partial edits preserve the required CheckPrintingInfo/Country."""
+    result = _ok(
+        run(tools["update_bank_account"].fn(bank_account_id=1, bank_account_data={"Description": "new"}))
+    )
+    assert result["data"]["Description"] == "new"
+
+
 def test_readonly_policy_blocks_mutations_e2e(mock_server, event_loop):
     """A readonly GuardedMCP must not expose mutating tools, but reads still work."""
     from fastmcp import FastMCP
