@@ -40,13 +40,24 @@ label {
 }
 
 input,
-textarea {
+textarea,
+select {
   width: 100%;
   padding: 8px 10px;
   border: 1px solid #ccc;
   border-radius: 6px;
   font: inherit;
   box-sizing: border-box;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.checkbox-row input[type="checkbox"] {
+  width: auto;
 }
 
 code {

@@ -70,8 +70,6 @@ export class ChatClient {
    * download link; `onArtifact` is invoked for each as it arrives.
    * @param {Array<{role:string, content:string, attachments?:Array<object>}>} history
    * @param {{onToken?:(t:string)=>void,
-   *          onToolCall?:(name:string, args:object)=>void,
-   *          onToolResult?:(name:string, text:string)=>void,
    *          onArtifact?:(artifact:object)=>void}} [callbacks]
    * @returns {Promise<{content:string, artifacts:Array<object>}>}
    */
@@ -124,10 +122,8 @@ export class ChatClient {
         if (callbacks.onToken) callbacks.onToken(event.text || "");
         break;
       case "tool_call":
-        if (callbacks.onToolCall) callbacks.onToolCall(event.name, event.arguments || {});
-        break;
       case "tool_result":
-        if (callbacks.onToolResult) callbacks.onToolResult(event.name, event.text || "");
+        // Server-side /chat currently hides internal loop events from clients.
         break;
       case "artifact":
         state.artifacts.push(event);

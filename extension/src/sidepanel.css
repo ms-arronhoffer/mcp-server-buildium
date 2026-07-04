@@ -144,6 +144,12 @@ button.link {
   max-width: 95%;
 }
 
+.msg.system {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+}
+
 /* Rendered Markdown inside an assistant bubble. */
 .msg.markdown {
   white-space: normal;

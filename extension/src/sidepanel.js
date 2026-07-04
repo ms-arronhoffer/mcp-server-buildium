@@ -1,24 +1,20 @@
-/**
- * Side panel controller: wires the chat UI to the LLM agent + MCP client.
- *
- * Responsibilities:
- *  - Load config; prompt to open settings when incomplete.
- *  - Manage Entra sign-in state and the connection indicator.
- *  - On send: append the user message, stream the assistant reply, and render
- *    any tool calls/results the agent performs.
- */
-
 import { getApi } from "./browser.js";
 import { getAccessToken, isSignedIn, signIn, signOut } from "./auth.js";
 import { loadConfig, validateConfig } from "./config.js";
 import { ChatClient } from "./llm.js";
-import { renderMarkdown } from "./markdown.js";
+import { normalizeError } from "./errors.js";
+import { NotificationCenter } from "./notificationCenter.js";
+import { ChatStateMachine, CHAT_STATES } from "./chatState.js";
+import { ArtifactUrlStore } from "./artifactUrls.js";
 import {
-  MAX_ATTACHMENT_BYTES,
-  fileToAttachment,
-  validateFile,
-} from "./attachments.js";
-import { artifactToBlobUrl, formatBytes } from "./downloads.js";
+  addMessage,
+  hideBanner,
+  renderAssistantMarkdown,
+  setConnection,
+  showBanner,
+} from "./sidepanel_ui.js";
+import { AttachmentController } from "./sidepanel_attachments.js";
+import { renderDownloads } from "./sidepanel_downloads.js";
 
 const api = getApi();
 
@@ -39,136 +35,40 @@ const els = {
 /** @type {import('./config.js').ExtensionConfig|null} */
 let config = null;
 let chat = null;
-let busy = false;
-/** Chat history in OpenAI message format (user/assistant only). */
 const history = [];
-/**
- * Pending attachments picked for the next message.
- * @type {Array<{name:string, media_type:string, data:string}>}
- */
-let pendingAttachments = [];
+const chatState = new ChatStateMachine();
+const artifactUrls = new ArtifactUrlStore();
 
-function showBanner(text, isError = false) {
-  els.banner.textContent = text;
-  els.banner.classList.toggle("error", isError);
-  els.banner.classList.remove("hidden");
+const attachmentController = new AttachmentController(els.attachments, (text, isError) =>
+  showBanner(els.banner, text, isError),
+);
+
+function addSystemMessage(text) {
+  addMessage(els.messages, "assistant", `ℹ ${text}`, "system");
 }
 
-function hideBanner() {
-  els.banner.classList.add("hidden");
+const notifications = new NotificationCenter({
+  showBanner: (text, isError) => showBanner(els.banner, text, isError),
+  addSystemMessage,
+});
+
+function setBusy(isBusy) {
+  els.send.disabled = isBusy;
 }
 
-function setConnection(state) {
-  els.connDot.classList.remove("ok", "err");
-  if (state === "ok") els.connDot.classList.add("ok");
-  if (state === "err") els.connDot.classList.add("err");
-}
-
-function clearEmptyState() {
-  const empty = els.messages.querySelector(".empty");
-  if (empty) empty.remove();
-}
-
-function addMessage(role, text) {
-  clearEmptyState();
-  const div = document.createElement("div");
-  div.className = `msg ${role}`;
-  div.textContent = text;
-  els.messages.appendChild(div);
-  els.messages.scrollTop = els.messages.scrollHeight;
-  return div;
-}
-
-/** Render the pending-attachment chips (with remove buttons) below the input. */
-function renderAttachmentChips() {
-  els.attachments.textContent = "";
-  els.attachments.classList.toggle("hidden", pendingAttachments.length === 0);
-  pendingAttachments.forEach((att, index) => {
-    const chip = document.createElement("span");
-    chip.className = "chip";
-    const label = document.createElement("span");
-    label.className = "chip-label";
-    label.textContent = att.name;
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.className = "chip-remove";
-    remove.title = "Remove attachment";
-    remove.textContent = "✕";
-    remove.addEventListener("click", () => {
-      pendingAttachments.splice(index, 1);
-      renderAttachmentChips();
-    });
-    chip.append(label, remove);
-    els.attachments.appendChild(chip);
-  });
-}
-
-/** Read and validate files picked via the attach button into pending attachments. */
-async function addFiles(fileList) {
-  const files = Array.from(fileList || []);
-  for (const file of files) {
-    const error = validateFile(file, MAX_ATTACHMENT_BYTES);
-    if (error) {
-      showBanner(error, true);
-      continue;
-    }
-    try {
-      pendingAttachments.push(await fileToAttachment(file));
-    } catch {
-      showBanner(`Could not read ${file.name}.`, true);
-    }
-  }
-  renderAttachmentChips();
-}
-
-/**
- * Replace an assistant bubble's contents with rendered Markdown. Clicking an
- * action link/row sends a follow-up lookup for that specific record.
- */
-function renderAssistantMarkdown(el, text) {
-  el.textContent = "";
-  el.classList.add("markdown");
-  el.appendChild(renderMarkdown(text, (prompt) => handleSend(prompt)));
-  els.messages.scrollTop = els.messages.scrollHeight;
-}
-
-/**
- * Append download links for assistant-generated files to a message element.
- * Each artifact is turned into an object URL and rendered as a download anchor.
- * @param {HTMLElement} el
- * @param {Array<{name?:string, media_type?:string, size?:number, data:string}>} artifacts
- */
-function renderDownloads(el, artifacts) {
-  if (!artifacts || artifacts.length === 0) return;
-  const container = document.createElement("div");
-  container.className = "downloads";
-  for (const artifact of artifacts) {
-    try {
-      const { url, name } = artifactToBlobUrl(artifact);
-      const link = document.createElement("a");
-      link.className = "download-link";
-      link.href = url;
-      link.download = name;
-      link.textContent = `⬇ ${name}`;
-      if (typeof artifact.size === "number") {
-        const size = document.createElement("span");
-        size.className = "download-size";
-        size.textContent = ` (${formatBytes(artifact.size)})`;
-        link.appendChild(size);
-      }
-      container.appendChild(link);
-    } catch {
-      showBanner(`Could not prepare ${artifact.name || "file"} for download.`, true);
-    }
-  }
-  el.appendChild(container);
-  els.messages.scrollTop = els.messages.scrollHeight;
+function notify(event) {
+  const channels = {
+    banner: event.channels?.banner ?? true,
+    chat: !!(config?.notificationChat && event.channels?.chat),
+    browser: !!(config?.notificationBrowser && event.channels?.browser),
+  };
+  notifications.notify({ ...event, channels });
 }
 
 async function refreshSignInState() {
   const signedIn = await isSignedIn();
   els.signin.textContent = signedIn ? "Sign out" : "Sign in";
-  setConnection(signedIn ? "ok" : null);
+  setConnection(els.connDot, signedIn ? "ok" : null);
   return signedIn;
 }
 
@@ -176,77 +76,121 @@ async function ensureReady() {
   config = await loadConfig();
   const errors = validateConfig(config);
   if (errors.length > 0) {
-    showBanner("Configuration required — open settings (⚙). " + errors.join(" "), true);
+    notify({
+      type: "system",
+      severity: "error",
+      message: "Configuration required — open settings (⚙). " + errors.join(" "),
+      dedupeKey: "config-required",
+      channels: { banner: true, chat: false, browser: false },
+    });
     return false;
   }
-  hideBanner();
+  hideBanner(els.banner);
   chat = new ChatClient(config, (opts) => getAccessToken(config, opts));
   await refreshSignInState();
   return true;
 }
 
 async function handleSend(text) {
-  if (busy || (!text.trim() && pendingAttachments.length === 0)) return;
+  if (![CHAT_STATES.IDLE, CHAT_STATES.COMPLETE, CHAT_STATES.ERROR].includes(chatState.state)) {
+    return;
+  }
+  const attachments = attachmentController.pending;
+  if (!text.trim() && attachments.length === 0) return;
   if (!(await ensureReady())) return;
 
-  busy = true;
-  els.send.disabled = true;
+  chatState.transition(CHAT_STATES.SENDING);
+  setBusy(true);
 
-  // Consume the pending attachments for this turn and clear the composer chips.
-  const attachments = pendingAttachments;
-  pendingAttachments = [];
-  renderAttachmentChips();
-
+  const consumedAttachments = attachmentController.consume();
   const userLabel =
-    attachments.length > 0
-      ? `${text}${text.trim() ? "\n" : ""}📎 ${attachments.map((a) => a.name).join(", ")}`
+    consumedAttachments.length > 0
+      ? `${text}${text.trim() ? "\n" : ""}📎 ${consumedAttachments.map((a) => a.name).join(", ")}`
       : text;
-  addMessage("user", userLabel);
+  addMessage(els.messages, "user", userLabel);
+
   const userMessage = { role: "user", content: text };
-  if (attachments.length > 0) userMessage.attachments = attachments;
+  if (consumedAttachments.length > 0) userMessage.attachments = consumedAttachments;
   history.push(userMessage);
 
-  const assistantEl = addMessage("assistant", "");
+  const assistantEl = addMessage(els.messages, "assistant", "");
   let streamed = "";
 
   try {
     const { content, artifacts } = await chat.run(history, {
-      onToken: (t) => {
-        streamed += t;
+      onToken: (token) => {
+        if (chatState.state === CHAT_STATES.SENDING) chatState.transition(CHAT_STATES.STREAMING);
+        streamed += token;
         assistantEl.textContent = streamed;
         els.messages.scrollTop = els.messages.scrollHeight;
       },
     });
+
     const finalText = content || streamed;
     if (finalText) {
-      renderAssistantMarkdown(assistantEl, finalText);
+      renderAssistantMarkdown(els.messages, assistantEl, finalText, (prompt) => handleSend(prompt));
     } else if (artifacts && artifacts.length > 0) {
-      assistantEl.textContent =
-        artifacts.length > 1 ? "Here are your files:" : "Here is your file:";
+      assistantEl.textContent = artifacts.length > 1 ? "Here are your files:" : "Here is your file:";
     } else {
       assistantEl.textContent = "(no response)";
     }
-    renderDownloads(assistantEl, artifacts);
+
+    renderDownloads(els.messages, assistantEl, artifacts, artifactUrls, (msg, isError) =>
+      notify({
+        type: "artifact_ready",
+        severity: isError ? "error" : "info",
+        message: msg,
+        dedupeKey: `artifact-${msg}`,
+        channels: { banner: true, chat: false, browser: false },
+      }),
+    );
+
+    if (artifacts?.length) {
+      notify({
+        type: "artifact_ready",
+        severity: "info",
+        message: artifacts.length > 1 ? "Files are ready for download." : "File is ready for download.",
+        dedupeKey: `artifact-ready-${artifacts.length}`,
+        channels: { banner: true, chat: true, browser: false },
+      });
+    }
+
     history.push({ role: "assistant", content: finalText });
-    setConnection("ok");
+    setConnection(els.connDot, "ok");
+    chatState.transition(CHAT_STATES.COMPLETE);
   } catch (err) {
-    if (err && err.code === 401) {
-      showBanner("Session expired. Please sign in again.", true);
+    const normalized = normalizeError(err, "Chat request failed.");
+    chatState.transition(CHAT_STATES.ERROR);
+    if (normalized.type === "auth") {
       assistantEl.remove();
+      notify({
+        type: "auth",
+        severity: "error",
+        message: "Session expired. Please sign in again.",
+        dedupeKey: "auth-expired",
+        channels: { banner: true, chat: true, browser: false },
+      });
       await signOut();
       await refreshSignInState();
     } else {
-      assistantEl.textContent = `⚠ ${err.message}`;
-      setConnection("err");
+      assistantEl.textContent = `⚠ ${normalized.message}`;
+      setConnection(els.connDot, "err");
+      notify({
+        type: normalized.type,
+        severity: normalized.severity,
+        message: normalized.message,
+        dedupeKey: `chat-error-${normalized.type}`,
+        channels: { banner: true, chat: false, browser: false },
+      });
     }
   } finally {
-    busy = false;
-    els.send.disabled = false;
+    setBusy(false);
     els.input.focus();
+    if (chatState.state === CHAT_STATES.COMPLETE || chatState.state === CHAT_STATES.ERROR) {
+      chatState.transition(CHAT_STATES.IDLE);
+    }
   }
 }
-
-// --- Event wiring ---------------------------------------------------------
 
 els.form.addEventListener("submit", (e) => {
   e.preventDefault();
@@ -256,13 +200,13 @@ els.form.addEventListener("submit", (e) => {
   handleSend(text);
 });
 
-// Enter to send, Shift+Enter for newline; auto-grow the textarea.
 els.input.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
     els.form.requestSubmit();
   }
 });
+
 els.input.addEventListener("input", () => {
   els.input.style.height = "auto";
   els.input.style.height = `${Math.min(els.input.scrollHeight, 160)}px`;
@@ -272,7 +216,13 @@ els.signin.addEventListener("click", async () => {
   if (!config) config = await loadConfig();
   const errors = validateConfig(config);
   if (errors.length > 0) {
-    showBanner("Configuration required — open settings (⚙).", true);
+    notify({
+      type: "system",
+      severity: "error",
+      message: "Configuration required — open settings (⚙).",
+      dedupeKey: "signin-config-required",
+      channels: { banner: true, chat: false, browser: false },
+    });
     return;
   }
   try {
@@ -283,22 +233,41 @@ els.signin.addEventListener("click", async () => {
     }
     await refreshSignInState();
   } catch (err) {
-    showBanner(`Sign-in failed: ${err.message}`, true);
+    const normalized = normalizeError(err, "Sign-in failed.");
+    notify({
+      type: normalized.type,
+      severity: "error",
+      message: `Sign-in failed: ${normalized.message}`,
+      dedupeKey: "signin-failed",
+      channels: { banner: true, chat: false, browser: false },
+    });
   }
 });
 
 els.settings.addEventListener("click", () => api.runtime.openOptionsPage());
-
-// Attach documents: the button opens the hidden file picker; picked files are
-// read into pending attachments and shown as chips until the message is sent.
 els.attachBtn.addEventListener("click", () => els.fileInput.click());
 els.fileInput.addEventListener("change", async () => {
-  await addFiles(els.fileInput.files);
+  await attachmentController.addFiles(els.fileInput.files);
   els.fileInput.value = "";
 });
 
-// --- Init -----------------------------------------------------------------
+api.runtime.onMessage.addListener((message) => {
+  if (!message || message.type !== "digest_notification") return;
+  const text = message.text || "New portfolio digest available.";
+  notify({
+    type: "digest",
+    severity: "info",
+    message: text,
+    dedupeKey: message.dedupeKey || text,
+    channels: { banner: !!config?.notificationInPanel, chat: !!config?.notificationChat, browser: false },
+  });
+});
 
-addMessage("assistant", "");
+window.addEventListener("beforeunload", () => {
+  artifactUrls.revokeAll();
+  api.runtime.sendMessage({ type: "panel_closed" }).catch(() => undefined);
+});
+
 els.messages.innerHTML = '<div class="empty">Ask a question to get started.</div>';
+api.runtime.sendMessage({ type: "panel_open" }).catch(() => undefined);
 ensureReady();

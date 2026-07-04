@@ -110,6 +110,10 @@ Open the extension's **Settings** (the ⚙ button in the panel, or the extension
 | Entra client ID | The **public-client/SPA** app registration ID for *this extension*. |
 | Entra scopes | e.g. `api://<mcp-api-app-id>/MCP.Access`. |
 | Model (optional) | A model name to request from the server. Must be one the server allows (see its `BUILDIUM_LLM_ALLOWED_MODELS`); leave blank to use the server default. |
+| Enable background role notification polling | Turns on proactive polling of `role_notification_feed` from the `intelligence` tools category. |
+| Role feed | Which role digest to poll (`pm`, `accounting`, `leadership`). |
+| Polling interval | Background alarm interval in minutes (1–1440). |
+| In-panel / in-chat / browser notification toggles | Controls where proactive digest notifications are delivered. |
 
 > **No provider keys in the browser.** The LLM API base, key, and system prompt are
 > **server-side settings** now — configure them on the MCP server via `BUILDIUM_LLM_*`
@@ -166,7 +170,7 @@ MCP_TEST_URL=http://localhost:8000/mcp MCP_TEST_TOKEN=dev-token npm test -- inte
   ever shipped to the browser.
 * PKCE (S256) + a random `state` protect the authorization code exchange.
 * Strict MV3 CSP (`script-src 'self'`); no remote code, no `eval`.
-* Permissions are minimal: `storage`, `identity`, and (Chrome) `sidePanel`.
+* Permissions are minimal: `storage`, `identity`, `alarms`, `notifications`, and (Chrome) `sidePanel`.
 * **Session resilience:** if a chat request is rejected with a `401` because the
   cached access token has gone stale, the client silently mints a fresh token
   and retries once before surfacing a "Session expired" message, so a stale

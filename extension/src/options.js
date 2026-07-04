@@ -5,7 +5,19 @@ import { DEFAULT_CONFIG, bakedFields, loadConfig, saveConfig, validateConfig } f
 
 const api = getApi();
 
-const FIELDS = ["mcpServerUrl", "entraTenantId", "entraClientId", "entraScopes", "llmModel"];
+const FIELD_CONFIG = [
+  { key: "mcpServerUrl", type: "text" },
+  { key: "entraTenantId", type: "text" },
+  { key: "entraClientId", type: "text" },
+  { key: "entraScopes", type: "text" },
+  { key: "llmModel", type: "text" },
+  { key: "notificationFeatureEnabled", type: "checkbox" },
+  { key: "notificationRole", type: "text" },
+  { key: "notificationPollMinutes", type: "number" },
+  { key: "notificationInPanel", type: "checkbox" },
+  { key: "notificationBrowser", type: "checkbox" },
+  { key: "notificationChat", type: "checkbox" },
+];
 
 function el(id) {
   return document.getElementById(id);
@@ -14,12 +26,17 @@ function el(id) {
 async function populate() {
   const cfg = await loadConfig();
   const preconfigured = new Set(bakedFields());
-  for (const key of FIELDS) {
-    el(key).value = cfg[key] ?? DEFAULT_CONFIG[key] ?? "";
+  for (const field of FIELD_CONFIG) {
+    const node = el(field.key);
+    if (field.type === "checkbox") {
+      node.checked = Boolean(cfg[field.key] ?? DEFAULT_CONFIG[field.key]);
+    } else {
+      node.value = cfg[field.key] ?? DEFAULT_CONFIG[field.key] ?? "";
+    }
     // Baked defaults are prepopulated but remain user-editable.
-    if (preconfigured.has(key)) {
-      el(key).title = "Prepopulated by this build — you can override it.";
-      el(key).classList.add("prefilled");
+    if (preconfigured.has(field.key)) {
+      node.title = "Prepopulated by this build — you can override it.";
+      node.classList.add("prefilled");
     }
   }
   try {
@@ -42,8 +59,15 @@ function showErrors(errors) {
 el("settings-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const cfg = {};
-  for (const key of FIELDS) {
-    cfg[key] = el(key).value.trim();
+  for (const field of FIELD_CONFIG) {
+    const node = el(field.key);
+    if (field.type === "checkbox") {
+      cfg[field.key] = node.checked;
+    } else if (field.type === "number") {
+      cfg[field.key] = Number(node.value || DEFAULT_CONFIG[field.key]);
+    } else {
+      cfg[field.key] = node.value.trim();
+    }
   }
   const errors = validateConfig(cfg);
   showErrors(errors);

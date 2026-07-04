@@ -49,6 +49,37 @@
           </p>
         </fieldset>
 
+        <fieldset>
+          <legend>Proactive notifications</legend>
+          <label class="checkbox-row">
+            <input id="notificationFeatureEnabled" type="checkbox" />
+            Enable background role notification polling
+          </label>
+
+          <label for="notificationRole">Role feed</label>
+          <select id="notificationRole">
+            <option value="pm">Property management</option>
+            <option value="accounting">Accounting</option>
+            <option value="leadership">Leadership</option>
+          </select>
+
+          <label for="notificationPollMinutes">Polling interval (minutes)</label>
+          <input id="notificationPollMinutes" type="number" min="1" max="1440" />
+
+          <label class="checkbox-row">
+            <input id="notificationInPanel" type="checkbox" />
+            Show digest notifications in the side panel
+          </label>
+          <label class="checkbox-row">
+            <input id="notificationChat" type="checkbox" />
+            Also post digest notifications as in-chat system messages
+          </label>
+          <label class="checkbox-row">
+            <input id="notificationBrowser" type="checkbox" />
+            Show browser notifications when panel delivery is unavailable
+          </label>
+        </fieldset>
+
         <div class="row">
           <button type="submit">Save</button>
           <span id="status" class="status" aria-live="polite"></span>
