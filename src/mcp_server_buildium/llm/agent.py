@@ -82,6 +82,11 @@ async def run_chat(
             yield {"type": "error", "message": str(exc)}
             return
 
+        # Emit routing metadata on the first turn when the model router selected
+        # a provider. ``routing_info`` is ``None`` for non-router providers.
+        if completion.routing_info:
+            yield {"type": "routing", **completion.routing_info}
+
         if completion.content:
             yield {"type": "token", "text": completion.content}
 

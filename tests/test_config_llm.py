@@ -83,3 +83,150 @@ def test_default_system_prompt_present() -> None:
     assert "action:" in prompt
     custom = _cfg(llm_system_prompt="Be terse.")
     assert custom.get_llm_system_prompt() == "Be terse."
+
+
+# ---------------------------------------------------------------------------
+# Router config tests
+# ---------------------------------------------------------------------------
+
+import json  # noqa: E402
+
+
+def _router_cfg(**overrides) -> BuildiumConfig:
+    """Build a minimal valid router config."""
+    defaults = {
+        "llm_router_enabled": True,
+        "llm_router_providers": json.dumps(
+            [
+                {"provider": "anthropic", "model": "claude-sonnet"},
+                {"provider": "openai", "model": "gpt-4o"},
+            ]
+        ),
+        "llm_anthropic_api_key": "anthr-k",
+        "llm_openai_api_key": "sk-k",
+    }
+    return _cfg(**{**defaults, **overrides})
+
+
+def test_router_enabled_llm_enabled():
+    cfg = _router_cfg()
+    assert cfg.llm_enabled() is True
+    assert cfg.get_llm_provider() == "router"
+
+
+def test_router_get_llm_models_returns_all_configured():
+    cfg = _router_cfg()
+    assert cfg.get_llm_models() == ["claude-sonnet", "gpt-4o"]
+
+
+def test_router_is_llm_model_allowed_empty_is_ok():
+    cfg = _router_cfg()
+    # Empty model = auto-route; always allowed.
+    assert cfg.is_llm_model_allowed("") is True
+
+
+def test_router_is_llm_model_allowed_valid_model():
+    cfg = _router_cfg()
+    assert cfg.is_llm_model_allowed("claude-sonnet") is True
+    assert cfg.is_llm_model_allowed("gpt-4o") is True
+
+
+def test_router_is_llm_model_allowed_unknown_model():
+    cfg = _router_cfg()
+    assert cfg.is_llm_model_allowed("unknown-model") is False
+
+
+def test_router_get_llm_router_providers():
+    cfg = _router_cfg()
+    providers = cfg.get_llm_router_providers()
+    assert providers is not None
+    assert len(providers) == 2
+    assert providers[0]["provider"] == "anthropic"
+    assert providers[0]["model"] == "claude-sonnet"
+
+
+def test_router_get_llm_router_providers_off():
+    cfg = _cfg()  # router disabled
+    assert cfg.get_llm_router_providers() is None
+
+
+def test_router_requires_providers_field():
+    with pytest.raises(ValueError, match="BUILDIUM_LLM_ROUTER_PROVIDERS is required"):
+        _cfg(llm_router_enabled=True, llm_router_providers=None)
+
+
+def test_router_providers_must_be_valid_json():
+    with pytest.raises(ValueError, match="valid JSON array"):
+        _cfg(llm_router_enabled=True, llm_router_providers="not-json")
+
+
+def test_router_providers_must_be_array():
+    with pytest.raises(ValueError, match="non-empty JSON array"):
+        _cfg(llm_router_enabled=True, llm_router_providers=json.dumps({}))
+
+
+def test_router_providers_array_must_be_nonempty():
+    with pytest.raises(ValueError, match="non-empty JSON array"):
+        _cfg(llm_router_enabled=True, llm_router_providers=json.dumps([]))
+
+
+def test_router_provider_name_must_be_valid():
+    with pytest.raises(ValueError, match="provider.*must be one of"):
+        _cfg(
+            llm_router_enabled=True,
+            llm_router_providers=json.dumps([{"provider": "mistral", "model": "m"}]),
+        )
+
+
+def test_router_model_must_be_nonempty():
+    with pytest.raises(ValueError, match="model must be a non-empty string"):
+        _cfg(
+            llm_router_enabled=True,
+            llm_router_providers=json.dumps([{"provider": "openai", "model": ""}]),
+            llm_openai_api_key="sk-k",
+        )
+
+
+def test_router_api_key_required_for_each_provider():
+    with pytest.raises(ValueError, match="requires.*API_KEY"):
+        _cfg(
+            llm_router_enabled=True,
+            llm_router_providers=json.dumps([{"provider": "anthropic", "model": "claude"}]),
+            # No llm_anthropic_api_key supplied.
+        )
+
+
+def test_router_invalid_strategy_rejected():
+    with pytest.raises(ValueError, match="BUILDIUM_LLM_ROUTER_STRATEGY must be one of"):
+        _router_cfg(llm_router_strategy="round-robin")
+
+
+def test_router_strategy_fallback_accepted():
+    cfg = _router_cfg(llm_router_strategy="fallback")
+    assert cfg.llm_router_strategy == "fallback"
+
+
+def test_router_max_tool_rounds_validated():
+    with pytest.raises(ValueError, match="BUILDIUM_LLM_MAX_TOOL_ROUNDS"):
+        _router_cfg(llm_max_tool_rounds=0)
+
+
+def test_router_single_provider_config_not_required():
+    """Single-provider BUILDIUM_LLM_PROVIDER/MODEL are irrelevant when router is on."""
+    cfg = _router_cfg()
+    # No llm_provider or llm_model set — must not raise.
+    assert cfg.llm_provider is None
+    assert cfg.llm_model is None
+
+
+def test_router_get_active_llm_key_returns_none():
+    """In router mode get_active_llm_key() returns None (keys are per-entry)."""
+    cfg = _router_cfg()
+    assert cfg.get_active_llm_key() is None
+
+
+def test_router_get_llm_base_url_returns_none():
+    """In router mode get_llm_base_url() returns None."""
+    cfg = _router_cfg()
+    assert cfg.get_llm_base_url() is None
+
