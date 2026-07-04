@@ -15,6 +15,7 @@ from .security.registration import GuardedMCP
 from .security.scoping import EntraScopingMiddleware
 from .tools import _common as c
 from .tools.alerts import register_alert_tools
+from .tools.analytics import register_analytics_tools
 from .tools.applicants import register_applicant_tools
 from .tools.associations import register_association_tools
 from .tools.bank_accounts import register_bank_account_tools
@@ -100,6 +101,7 @@ _CATEGORY_REGISTRARS = {
     "reports": register_report_tools,
     "close": register_close_tools,
     "alerts": register_alert_tools,
+    "analytics": register_analytics_tools,
 }
 
 for _category, _register in _CATEGORY_REGISTRARS.items():
