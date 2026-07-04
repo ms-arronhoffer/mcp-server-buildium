@@ -90,7 +90,7 @@ Control which tool categories are enabled using the `BUILDIUM_CATEGORIES` enviro
 | `work_orders` | 4 | Work order management |
 | `documents` | 4 | Document generation and downloadable file creation |
 | `ownership_accounts` | 11 | Association ownership-account ledger (charges, payments, credits, refunds, outstanding balances) |
-| `communications` | 14 | Announcements, emails, phone logs, and mailing templates |
+| `communications` | 10 | Announcements, phone logs, and mailing templates |
 | `budgets` | 4 | Budget planning (create/update/get/list) |
 | `reference` | 1 | Reference-data vocabularies for enum fields (also exposed as MCP resources) |
 | `reports` | 3 | Deterministic, reconciled financial reports (rent roll, aged receivables, income statement) with branded PDF/XLSX/CSV export |
@@ -605,9 +605,8 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 * `create_ownership_account_refund` - Issue an ownership-account refund *(sensitive)*
 * `list_ownership_account_outstanding_balances` - List outstanding balances across ownership accounts
 
-### Communications (14 tools)
+### Communications (10 tools)
 * `list_announcements` / `get_announcement` / `create_announcement` / `expire_announcement` - Resident/owner announcements
-* `list_emails` / `get_email` / `create_email` / `list_email_recipients` - Email outreach
 * `list_phone_logs` / `get_phone_log` / `create_phone_log` / `update_phone_log` - Phone call logging
 * `list_mailing_templates` / `get_mailing_template` - Mailing templates
 

@@ -1,7 +1,11 @@
-"""Communications tools for Buildium (announcements, emails, phone logs, templates).
+"""Communications tools for Buildium (announcements, phone logs, mailing templates).
 
-Enables resident/owner outreach: create and manage announcements, send and read
-emails, log and manage phone calls, and read mailing templates.
+Enables resident/owner outreach: create and manage announcements, log and manage
+phone calls, and read mailing templates.
+
+Note: the email feature (list/get/create emails and email recipients) is
+currently stashed and intentionally not registered. The Buildium email
+operations remain available in the SDK and can be restored from git history.
 """
 
 from typing import Any
@@ -21,10 +25,6 @@ def register_communication_tools(mcp: FastMCP, client: BuildiumClient) -> None:
     c.register_operation(
         "expire_announcement", "ExternalApiAnnouncementsExpiration_ExpireAnnouncement"
     )
-    c.register_operation("list_emails", "ExternalApiEmails_GetEmails")
-    c.register_operation("get_email", "ExternalApiEmails_GetEmailById")
-    c.register_operation("create_email", "ExternalApiEmailsWrite_CreateEmail")
-    c.register_operation("list_email_recipients", "ExternalApiEmailRecipients_GetEmailRecipients")
     c.register_operation("list_phone_logs", "ExternalApiPhoneLogs_GetPhoneLogs")
     c.register_operation("get_phone_log", "ExternalApiPhoneLogs_GetPhoneLogById")
     c.register_operation("create_phone_log", "ExternalApiPhoneLogs_CreatePhoneLog")
@@ -82,66 +82,9 @@ def register_communication_tools(mcp: FastMCP, client: BuildiumClient) -> None:
         )
 
     # -- Emails ---------------------------------------------------------------
-    @mcp.tool()
-    async def list_emails(
-        sent_from: str, sent_to: str, limit: int = 100, offset: int = 0
-    ) -> dict[str, Any]:
-        """List sent emails within a date range (max 90 days).
-
-        Args:
-            sent_from: Start of the sent date/time range (ISO 8601, e.g.
-                ``2024-01-01T00:00:00Z``).
-            sent_to: End of the sent date/time range (ISO 8601). The range must
-                not exceed 90 days.
-            limit: Maximum number of results (1-1000, default: 100).
-            offset: Zero-based pagination offset (default: 0).
-        """
-        limit, offset = c.clamp_pagination(limit, offset)
-        return await c.execute(
-            "list_emails",
-            lambda: client.communications_api.external_api_emails_get_emails(
-                sentdatetimefrom=sent_from,
-                sentdatetimeto=sent_to,
-                limit=limit,
-                offset=offset,
-            ),
-        )
-
-    @mcp.tool()
-    async def get_email(email_id: int) -> dict[str, Any]:
-        """Get a specific email by ID."""
-        return await c.execute(
-            "get_email",
-            lambda: client.communications_api.external_api_emails_get_email_by_id(
-                email_id=email_id
-            ),
-        )
-
-    @mcp.tool()
-    async def create_email(email_data: dict[str, Any]) -> dict[str, Any]:
-        """Create (send) an email to residents/owners."""
-        return await c.create(
-            "create_email",
-            "email_post_message",
-            "EmailPostMessage",
-            email_data,
-            lambda message: client.communications_api.external_api_emails_write_create_email(
-                email_post_message=message
-            ),
-        )
-
-    @mcp.tool()
-    async def list_email_recipients(
-        email_id: int, limit: int = 100, offset: int = 0
-    ) -> dict[str, Any]:
-        """List the recipients of a specific email."""
-        limit, offset = c.clamp_pagination(limit, offset)
-        return await c.execute(
-            "list_email_recipients",
-            lambda: client.communications_api.external_api_email_recipients_get_email_recipients(
-                email_id=email_id, limit=limit, offset=offset
-            ),
-        )
+    # The email feature is stashed: list_emails / get_email / create_email /
+    # list_email_recipients are intentionally not registered. Restore from git
+    # history to re-enable resident/owner email outreach.
 
     # -- Phone logs -----------------------------------------------------------
     @mcp.tool()

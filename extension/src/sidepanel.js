@@ -1,6 +1,6 @@
 import { getApi } from "./browser.js";
 import { getAccessToken, isSignedIn, signIn, signOut } from "./auth.js";
-import { loadConfig, validateConfig } from "./config.js";
+import { CONFIG_STORAGE_KEY, loadConfig, validateConfig } from "./config.js";
 import { ChatClient } from "./llm.js";
 import { normalizeError } from "./errors.js";
 import { NotificationCenter } from "./notificationCenter.js";
@@ -71,6 +71,7 @@ const panelPrefs = {
   insightsCollapsed: false,
   recentPrompts: [],
   draft: "",
+  composerHeight: null,
 };
 
 let lastAttempt = "";
@@ -123,6 +124,46 @@ function scheduleSavePanelPrefs(delay = 250) {
 
 function renderOnboarding() {
   els.onboarding.classList.toggle("hidden", panelPrefs.onboardingDismissed);
+}
+
+const FONT_SIZES = new Set(["small", "medium", "large", "xlarge"]);
+
+/** Apply the overall font-size preference from config to the panel. */
+function applyFontSize(size) {
+  const value = FONT_SIZES.has(size) ? size : "medium";
+  document.body.dataset.fontSize = value;
+}
+
+// Tracks the last height we set programmatically so the ResizeObserver can
+// distinguish our own auto-grow updates from a user dragging the resize handle.
+let lastAutoComposerHeight = 0;
+
+/** Grow the composer to fit its content, honoring any user-chosen height. */
+function autoGrowInput() {
+  if (panelPrefs.composerHeight) {
+    els.input.style.height = `${panelPrefs.composerHeight}px`;
+    lastAutoComposerHeight = els.input.offsetHeight;
+    return;
+  }
+  els.input.style.height = "auto";
+  els.input.style.height = `${Math.min(els.input.scrollHeight, 160)}px`;
+  lastAutoComposerHeight = els.input.offsetHeight;
+}
+
+/** Persist a manual resize of the composer performed via the drag handle. */
+function watchComposerResize() {
+  if (typeof ResizeObserver === "undefined") return;
+  const observer = new ResizeObserver(() => {
+    const height = els.input.offsetHeight;
+    // Ignore height changes we caused ourselves via autoGrowInput(). The 1px
+    // tolerance absorbs sub-pixel rounding differences between the height we
+    // set and the value the browser reports back to the observer.
+    if (Math.abs(height - lastAutoComposerHeight) <= 1) return;
+    lastAutoComposerHeight = height;
+    panelPrefs.composerHeight = height;
+    scheduleSavePanelPrefs();
+  });
+  observer.observe(els.input);
 }
 
 function renderInsightsCollapsed() {
@@ -285,6 +326,7 @@ async function refreshSignInState() {
 
 async function ensureReady() {
   config = await loadConfig();
+  applyFontSize(config.fontSize);
   const errors = validateConfig(config);
   if (errors.length > 0) {
     notify({
@@ -318,7 +360,7 @@ async function handleSend(text) {
   if (!(await ensureReady())) return;
 
   els.input.value = "";
-  els.input.style.height = "auto";
+  autoGrowInput();
   chatState.transition(CHAT_STATES.SENDING);
   setBusy(true);
   setComposerError("");
@@ -445,8 +487,7 @@ els.input.addEventListener("keydown", (e) => {
 });
 
 els.input.addEventListener("input", () => {
-  els.input.style.height = "auto";
-  els.input.style.height = `${Math.min(els.input.scrollHeight, 160)}px`;
+  autoGrowInput();
   updateComposerValidation();
 });
 
@@ -562,6 +603,16 @@ function cleanupPanelLifecycle() {
 window.addEventListener("beforeunload", cleanupPanelLifecycle);
 window.addEventListener("pagehide", cleanupPanelLifecycle);
 
+// Apply configuration changes saved from the options page without requiring
+// the user to close and reopen the side panel.
+api.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== "local" || !changes[CONFIG_STORAGE_KEY]) return;
+  ensureReady().catch((err) => {
+    // Best-effort refresh; surface the reason so a failed reload is diagnosable.
+    console.error("Failed to apply updated configuration:", err);
+  });
+});
+
 async function init() {
   await loadPanelPrefs();
   renderOnboarding();
@@ -571,6 +622,7 @@ async function init() {
   renderViewControls();
   els.input.value = panelPrefs.draft || "";
   els.input.dispatchEvent(new Event("input"));
+  watchComposerResize();
   els.retry.classList.add("hidden");
   els.messages.innerHTML =
     '<div class="empty">Ask a question to get started, or use a quick action above for common workflows.</div>';
