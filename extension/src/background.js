@@ -7,6 +7,13 @@
  */
 
 import { getApi } from "./browser.js";
+import {
+  bindRoleNotificationAlarms,
+  bindRoleNotificationConfigChanges,
+  bindRoleNotificationMessages,
+  configureRoleNotificationPolling,
+  runRoleNotificationPoll,
+} from "./background_notifications.js";
 
 const api = getApi();
 
@@ -16,3 +23,13 @@ if (api.sidePanel && api.sidePanel.setPanelBehavior) {
     .setPanelBehavior({ openPanelOnActionClick: true })
     .catch((err) => console.error("Failed to set side panel behavior:", err));
 }
+
+bindRoleNotificationMessages();
+bindRoleNotificationAlarms();
+bindRoleNotificationConfigChanges();
+configureRoleNotificationPolling().catch((err) => {
+  console.warn("Failed to configure role notification polling:", err);
+});
+runRoleNotificationPoll().catch((err) => {
+  console.warn("Initial role notification poll failed:", err);
+});

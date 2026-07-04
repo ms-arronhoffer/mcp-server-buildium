@@ -11,7 +11,7 @@
 ## Features
 
 * 🔐 **API Key Authentication** - Secure server-to-server authentication via headers
-* 🏘️ **168 Tools Across 23 Categories** - Comprehensive property management coverage
+* 🏘️ **185 Tools Across 24 Categories** - Comprehensive property management coverage
 * 💸 **Month-End Close Automation** - Post rent, apply payments oldest-first, assess late fees, and produce owner statements in one instruction (dry-run by default)
 * 🔔 **Proactive Alerts & Digest** - A rules layer for scheduled, push-style intelligence (lease expirations, late rent, low reserves, aging work orders)
 * 📊 **Trustworthy Financial Reports** - Deterministic, reconciled rent roll, aged receivables, and P&L with branded PDF/XLSX/CSV export
@@ -97,10 +97,11 @@ Control which tool categories are enabled using the `BUILDIUM_CATEGORIES` enviro
 | `close` | 1 | Month-end "close my books" automation (post rent, apply payments oldest-first, assess late fees, owner statements) |
 | `alerts` | 1 | Proactive portfolio intelligence — scheduled alerts & daily digest (lease expirations, late rent, low bank reserve, aging work orders) |
 | `analytics` | 8 | Deep-analysis & opportunity surfacing (budget variance, vacancy analysis, rent trend, vendor spend, cash flow projection, maintenance ROI, owner distribution, delinquency trend) |
+| `intelligence` | 17 | Net-new high-value intelligence: revenue leakage, turnover/renewal risk, owner risk, role digests, and explainable anomaly detection signals |
 
-**Total: 168 category tools + built-in `health_check` and `audit_summary` tools (170 total).**
+**Total: 185 category tools + built-in `health_check` and `audit_summary` tools (187 total).**
 
-If `BUILDIUM_CATEGORIES` is not set, all 168 tools across all 23 categories are enabled.
+If `BUILDIUM_CATEGORIES` is not set, all 185 tools across all 24 categories are enabled.
 
 ### Security, Roles & Audit
 
@@ -437,9 +438,9 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 }
 ```
 
-## Available Tools (168 category tools)
+## Available Tools (185 category tools)
 
-> In addition to the 168 category tools below, the server exposes two built-in
+> In addition to the 185 category tools below, the server exposes two built-in
 > tools that are always registered regardless of the active category set:
 >
 > * **`health_check`** — Returns the server version, uptime, active transport,
@@ -449,7 +450,7 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 >   counts by tool and outcome, error rate, recent mutations, recent denials)
 >   over MCP. Requires `BUILDIUM_AUDIT_SINK=file`.
 >
-> Total: 168 category tools + 2 built-in = **170 tools**.
+> Total: 185 category tools + 2 built-in = **187 tools**.
 
 ### Associations (6 tools)
 * `list_associations` - List all associations
@@ -637,6 +638,16 @@ download traceable back to source transactions.
 ### Alerts (1 tool)
 
 * `portfolio_alerts` - Proactive rules layer that scans the portfolio and returns prioritised alerts plus a human-readable daily digest: leases expiring with no renewal, late rent, bank accounts below reserve, and aging work orders. Point a scheduler (cron/task runner) at it for push-style intelligence. Optional `csv`/`xlsx`/`pdf` export.
+
+### Intelligence (17 tools)
+
+Net-new portfolio intelligence focused on outcomes (delinquency reduction, cash-risk prevention, vacancy reduction, maintenance/vendor cost control) while preserving existing tool policy and envelope behavior:
+
+* Revenue leakage surfacing: `missing_charge_detector`, `concession_drift_analyzer`, `security_deposit_exposure_report`
+* Portfolio health surfacing: `occupancy_turnover_latency_report`, `lease_renewal_likelihood_scorecard`, `owner_risk_dashboard`
+* Operations efficiency surfacing: `work_order_sla_bottleneck_report`, `vendor_concentration_variance_report`
+* Proactive notifications: `morning_portfolio_digest`, `end_of_day_exception_digest`, `role_notification_feed`
+* Explainable anomalies (standardized score/confidence/baseline/delta/why/recommendation/source records): `rent_payment_behavior_shift_anomaly`, `delinquency_cluster_anomaly`, `expense_anomaly_detection`, `work_order_cycle_time_anomaly`, `vacancy_duration_anomaly`, `data_quality_anomaly_scan`
 
 ## Tool Request/Response Examples
 
@@ -1120,4 +1131,3 @@ Contributions welcome! Please:
 ## Support
 
 This is an experimental community project. For Buildium API issues, consult the [Buildium Developer Center](https://developer.buildium.com/).
-

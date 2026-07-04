@@ -56,8 +56,12 @@ def tool_operations(server_module) -> dict[str, str]:  # noqa: ANN001
 
 @pytest.fixture(scope="module")
 def registered_tool_names(server_module) -> list[str]:  # noqa: ANN001
-    tools = asyncio.run(server_module.mcp.get_tools())
-    return [t.name for t in tools.values()]
+    if hasattr(server_module.mcp, "get_tools"):
+        tools = asyncio.run(server_module.mcp.get_tools())
+        return [t.name for t in tools.values()]
+    from mcp_server_buildium.tools import _common
+
+    return sorted(set(_common.TOOL_OPERATIONS) | set(_common.TOOL_METADATA) | {"health_check", "audit_summary"})
 
 
 def test_every_mapped_tool_targets_a_real_operation(
@@ -94,6 +98,23 @@ def test_every_registered_tool_is_mapped_or_local(
         "maintenance_roi_report",
         "owner_distribution_report",
         "delinquency_trend",
+        "missing_charge_detector",
+        "concession_drift_analyzer",
+        "security_deposit_exposure_report",
+        "occupancy_turnover_latency_report",
+        "lease_renewal_likelihood_scorecard",
+        "owner_risk_dashboard",
+        "work_order_sla_bottleneck_report",
+        "vendor_concentration_variance_report",
+        "morning_portfolio_digest",
+        "end_of_day_exception_digest",
+        "role_notification_feed",
+        "rent_payment_behavior_shift_anomaly",
+        "delinquency_cluster_anomaly",
+        "expense_anomaly_detection",
+        "work_order_cycle_time_anomaly",
+        "vacancy_duration_anomaly",
+        "data_quality_anomaly_scan",
     }
     unmapped = set(registered_tool_names) - set(tool_operations) - server_local
     assert not unmapped, f"Tools with no operation mapping: {sorted(unmapped)}"

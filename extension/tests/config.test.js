@@ -59,14 +59,32 @@ describe("config", () => {
     expect(errors.join(" ")).toMatch(/http:\/\/ or https:\/\//);
   });
 
-  it("pickKnownFields keeps only recognised, non-empty string fields", () => {
+  it("pickKnownFields keeps only recognised values by field type", () => {
     const picked = pickKnownFields({
       mcpServerUrl: "https://baked/mcp",
       entraScopes: "",
       unknownKey: "ignored",
       entraTenantId: "baked-tid",
+      notificationFeatureEnabled: true,
+      notificationPollMinutes: "20",
     });
-    expect(picked).toEqual({ mcpServerUrl: "https://baked/mcp", entraTenantId: "baked-tid" });
+    expect(picked).toEqual({
+      mcpServerUrl: "https://baked/mcp",
+      entraTenantId: "baked-tid",
+      notificationFeatureEnabled: true,
+      notificationPollMinutes: 20,
+    });
+  });
+
+  it("validates notification poll interval bounds", () => {
+    const errors = validateConfig({
+      mcpServerUrl: "https://host/mcp",
+      entraTenantId: "tid",
+      entraClientId: "cid",
+      entraScopes: "api://x/MCP.Access",
+      notificationPollMinutes: 0,
+    });
+    expect(errors.join(" ")).toMatch(/between 1 and 1440/);
   });
 
   it("lets user-stored settings override baked defaults, which override built-ins", () => {

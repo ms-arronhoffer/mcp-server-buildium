@@ -17,6 +17,12 @@ import { BAKED_CONFIG } from "./config.baked.js";
  * @property {string} entraClientId  App registration (public client) ID for THIS extension
  * @property {string} entraScopes    Space-separated scopes to request (e.g. 'api://<api-id>/MCP.Access')
  * @property {string} llmModel       Optional model to request (blank = the server's default)
+ * @property {boolean} notificationFeatureEnabled Enable proactive role notifications
+ * @property {string} notificationRole Role feed to poll ("pm", "accounting", "leadership")
+ * @property {number} notificationPollMinutes Poll interval in minutes
+ * @property {boolean} notificationInPanel Show proactive notifications in panel
+ * @property {boolean} notificationBrowser Show proactive browser notifications
+ * @property {boolean} notificationChat Show proactive notifications as chat system messages
  */
 
 /** @type {ExtensionConfig} */
@@ -26,6 +32,12 @@ export const DEFAULT_CONFIG = {
   entraClientId: "",
   entraScopes: "",
   llmModel: "",
+  notificationFeatureEnabled: false,
+  notificationRole: "pm",
+  notificationPollMinutes: 15,
+  notificationInPanel: true,
+  notificationBrowser: false,
+  notificationChat: true,
 };
 
 const STORAGE_KEY = "buildium_mcp_config";
@@ -41,8 +53,17 @@ export function pickKnownFields(source) {
   if (!source || typeof source !== "object") return out;
   for (const key of Object.keys(DEFAULT_CONFIG)) {
     const value = source[key];
-    if (typeof value === "string" && value.trim() !== "") {
-      out[key] = value;
+    if (typeof DEFAULT_CONFIG[key] === "string") {
+      if (typeof value === "string" && value.trim() !== "") out[key] = value;
+      continue;
+    }
+    if (typeof DEFAULT_CONFIG[key] === "boolean") {
+      if (typeof value === "boolean") out[key] = value;
+      continue;
+    }
+    if (typeof DEFAULT_CONFIG[key] === "number") {
+      const numeric = Number(value);
+      if (Number.isFinite(numeric)) out[key] = numeric;
     }
   }
   return out;
@@ -82,6 +103,10 @@ export function validateConfig(cfg) {
   }
   if (!(cfg.entraScopes || "").trim()) {
     errors.push("At least one Entra scope is required.");
+  }
+  const poll = Number(cfg.notificationPollMinutes);
+  if (Number.isFinite(poll) && (poll < 1 || poll > 1440)) {
+    errors.push("Notification poll interval must be between 1 and 1440 minutes.");
   }
   return errors;
 }

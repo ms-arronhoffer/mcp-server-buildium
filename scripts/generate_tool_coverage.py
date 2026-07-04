@@ -65,8 +65,15 @@ def load_tool_mappings() -> tuple[list[str], dict[str, str]]:
     from mcp_server_buildium import server
     from mcp_server_buildium.tools import _common
 
-    tools = asyncio.run(server.mcp.get_tools())
-    tool_names = sorted(t.name for t in tools.values())
+    if hasattr(server.mcp, "get_tools"):
+        tools = asyncio.run(server.mcp.get_tools())
+        tool_names = sorted(t.name for t in tools.values())
+    else:
+        tool_names = sorted(
+            set(_common.TOOL_OPERATIONS)
+            | set(_common.TOOL_METADATA)
+            | {"health_check", "audit_summary"}
+        )
     return tool_names, dict(_common.TOOL_OPERATIONS)
 
 

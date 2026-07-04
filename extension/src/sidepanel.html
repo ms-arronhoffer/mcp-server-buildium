@@ -11,20 +11,52 @@
       <header class="topbar">
         <div class="brand">
           <span class="dot" id="conn-dot" title="Connection status"></span>
+          <span id="conn-text" class="conn-text" aria-live="polite">Offline</span>
           <span class="title">Portfolio Desk AI Assistant</span>
         </div>
         <div class="actions">
+          <button id="retry-btn" class="link hidden" type="button">Retry</button>
+          <button id="clear-btn" class="link" type="button">Clear</button>
           <button id="signin-btn" class="link" type="button">Sign in</button>
           <button id="settings-btn" class="link" type="button" title="Settings">⚙</button>
         </div>
       </header>
 
       <div id="status-banner" class="banner hidden"></div>
+      <div id="toast" class="toast hidden" aria-live="polite"></div>
+
+      <section id="onboarding" class="onboarding hidden" aria-label="Getting started">
+        <div class="onboarding-copy">
+          <strong>Get started faster</strong>
+          <p>Use quick actions below or ask about leases, rent roll, and tenant follow-ups.</p>
+        </div>
+        <button id="dismiss-onboarding-btn" class="link" type="button">Dismiss</button>
+      </section>
+
+      <section id="insights-panel" class="insights" aria-label="What needs attention">
+        <div class="insights-head">
+          <h2>What needs attention</h2>
+          <div class="insights-controls">
+            <span id="last-updated" class="timestamp">Never</span>
+            <button id="toggle-insights-btn" class="link" type="button">Collapse</button>
+          </div>
+        </div>
+        <ul id="insights-list" class="insights-list" aria-live="polite">
+          <li class="insight neutral">No alerts yet. Your next update will appear here.</li>
+        </ul>
+        <div id="quick-actions" class="quick-actions" role="group" aria-label="Quick actions"></div>
+        <div id="view-controls" class="view-controls" role="group" aria-label="Message view filter">
+          <button type="button" class="view-btn active" data-view="all">All</button>
+          <button type="button" class="view-btn" data-view="alerts">Alerts</button>
+          <button type="button" class="view-btn" data-view="files">Files</button>
+        </div>
+      </section>
 
       <main id="messages" class="messages" aria-live="polite"></main>
 
       <form id="composer" class="composer">
         <div id="attachments" class="attachments hidden" aria-live="polite"></div>
+        <div id="recent-prompts" class="recent-prompts hidden" aria-label="Recent prompts"></div>
         <div class="composer-row">
           <input
             id="file-input"
@@ -39,8 +71,13 @@
             rows="1"
             placeholder="Ask about properties, leases, tenants…"
             autocomplete="off"
+            aria-label="Message"
           ></textarea>
-          <button id="send-btn" type="submit" title="Send">Send</button>
+          <button id="send-btn" type="submit" title="Send" aria-label="Send message">Send</button>
+        </div>
+        <div class="composer-meta">
+          <span id="composer-error" class="composer-error hidden" role="alert"></span>
+          <span id="composer-hint" class="composer-hint">Enter to send • Shift+Enter newline • Alt+1/2/3 quick actions</span>
         </div>
       </form>
     </div>
