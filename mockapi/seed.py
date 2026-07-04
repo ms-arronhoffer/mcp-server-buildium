@@ -311,6 +311,7 @@ def _seed_association_children(session: Session, association_id: int) -> None:
             "FirstName": f"AssocOwner{association_id}",
             "LastName": "Jones",
             "Email": f"assocowner{association_id}@example.com",
+            "PrimaryAddress": _addr(association_id),
         },
         entity_id=association_id,
         association_id=association_id,
@@ -428,11 +429,17 @@ def _seed_bank_accounts(session: Session) -> None:
             "Id": i,
             "Name": f"Operating Account {i}",
             "BankAccountType": "Checking",
+            "Country": "UnitedStates",
             "AccountNumberUnmasked": f"00000{i}",
             "AccountNumber": f"****{i}",
             "RoutingNumber": "021000021",
             "IsActive": True,
             "Balance": 25000.0 * i,
+            "CheckPrintingInfo": {
+                "EnableRemoteCheckPrinting": False,
+                "EnableLocalCheckPrinting": False,
+                "CheckLayoutType": "Voucher2StubTopMemo",
+            },
         }
         create_doc(session, "bank_accounts", doc, entity_id=i, status=status)
         for t in range(1, 4):
@@ -468,8 +475,13 @@ def _seed_bills(session: Session) -> None:
             "ApprovalStatus": "Approved",
             "Lines": [
                 {
+                    "Id": i,
+                    "AccountingEntity": {
+                        "Id": 1 + (i % NUM_PROPERTIES),
+                        "AccountingEntityType": "Rental",
+                    },
+                    "GLAccount": {"Id": 5001 + (i % 3), "Name": f"GL Account {1 + (i % 3)}"},
                     "Amount": 200.0 * i,
-                    "GlAccountId": 5000 + (i % 3),
                     "Memo": "Service line",
                 }
             ],
@@ -556,6 +568,7 @@ def _seed_work_orders(session: Session) -> None:
             "Title": f"Work Order {i}",
             "WorkOrderStatus": status,
             "Priority": ["Low", "Normal", "High"][i % 3],
+            "EntryAllowed": "Yes",
             "EntityType": "Rental",
             "EntityId": 1 + (i % NUM_PROPERTIES),
             "AssignedToUserId": 1,
