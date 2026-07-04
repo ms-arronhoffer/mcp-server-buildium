@@ -30,6 +30,35 @@ describe("parseInline", () => {
     ]);
   });
 
+  it("repairs bold markers that split an action link", () => {
+    // The assistant sometimes emits the bold markers *inside* the link boundary,
+    // e.g. `**[Label]**(action:…)` or `**[Label] (action:…)**`, which breaks the
+    // `[label](target)` grammar and would otherwise leak the raw `action:` text.
+    const expected = [
+      {
+        type: "bold",
+        children: [
+          { type: "action", label: "open work orders", prompt: "List work orders" },
+        ],
+      },
+    ];
+    expect(parseInline("**[open work orders]**(action:List work orders)")).toEqual(expected);
+    expect(parseInline("**[open work orders]** (action:List work orders)")).toEqual(expected);
+    expect(parseInline("**[open work orders] (action:List work orders)**")).toEqual(expected);
+  });
+
+  it("repairs a stray space between an action label and its target", () => {
+    expect(parseInline("[Work Order 2] (action:Get details for work order 2)")).toEqual([
+      { type: "action", label: "Work Order 2", prompt: "Get details for work order 2" },
+    ]);
+  });
+
+  it("does not turn a split unsafe scheme into a link", () => {
+    // Repairing malformed markup must never resurrect a `javascript:` target.
+    const tokens = parseInline("**[x]** (javascript:alert(1))");
+    expect(tokens.some((t) => t.type === "action" || t.type === "link")).toBe(false);
+  });
+
   it("parses external links as safe anchors", () => {
     expect(parseInline("see [docs](https://example.com)")).toEqual([
       { type: "text", value: "see " },

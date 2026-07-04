@@ -14,12 +14,42 @@
  * Parsing (`parseMarkdown`, `parseInline`) is pure and unit-tested; DOM building
  * (`renderMarkdown`) is a thin layer over it and is XSS-safe because every value
  * is inserted via `textContent`/DOM APIs rather than `innerHTML`.
+ *
+ * `parseInline` also repairs a few malformed action/link shapes the assistant
+ * occasionally emits (e.g. `**[label]**(action:…)`) so they render as clickable
+ * controls instead of leaking the raw `action:` markup to the user.
  */
 
 const ACTION_SCHEME = "action:";
 // URL schemes we are willing to turn into real anchors. Anything else (notably
 // `javascript:`) is rendered as inert text to avoid script injection.
 const SAFE_LINK_RE = /^(https?:|mailto:)/i;
+// Link target schemes we know how to render (action controls or safe anchors).
+// Used only to *repair* malformed markup, so it must not be broadened to unsafe
+// schemes such as `javascript:`.
+const LINK_TARGET_SCHEME = "action:|https?:|mailto:";
+
+/**
+ * Repair link/action markup that the assistant sometimes emits in a shape that
+ * breaks the `[label](target)` grammar, which would otherwise leak the raw
+ * `[label](action:…)` text to the user instead of a clickable control.
+ *
+ * Three shapes are normalised:
+ *  - `**[label]**(target)`   → `**[label](target)**`  (bold closed before target)
+ *  - `**[label]** (target)`  → `**[label](target)**`  (as above, with a space)
+ *  - `[label] (target)`      → `[label](target)`        (stray space before target)
+ *
+ * Only targets using a scheme we already render (`action:`, `http(s):`, `mailto:`)
+ * are touched, so ordinary prose like `see item] (foo)` is left untouched.
+ */
+function repairLinkMarkup(text) {
+  const boldSplit = new RegExp(
+    `\\*\\*(\\[[^\\]]+\\])\\*\\*\\s*(\\((?:${LINK_TARGET_SCHEME})[^)]*\\))`,
+    "gi",
+  );
+  const spacedTarget = new RegExp(`\\]\\s+(\\((?:${LINK_TARGET_SCHEME}))`, "gi");
+  return text.replace(boldSplit, "**$1$2**").replace(spacedTarget, "]$1");
+}
 
 /** Decode the prompt carried by an `action:` link. */
 function decodeAction(raw) {
@@ -40,6 +70,7 @@ export function parseInline(text) {
   const tokens = [];
   let buf = "";
   let i = 0;
+  text = repairLinkMarkup(String(text ?? ""));
 
   const flush = () => {
     if (buf) {
