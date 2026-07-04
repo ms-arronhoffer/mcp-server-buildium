@@ -78,10 +78,34 @@ function renderBakedModule(baked) {
   );
 }
 
+/**
+ * Manifest keys whose array values must be unioned (base ∪ override) rather than
+ * replaced when merging. A shallow `{...base, ...override}` would otherwise let a
+ * platform manifest that lists `permissions` silently drop the shared base
+ * permissions (e.g. `alarms`/`notifications`), which crashes the background
+ * service worker at startup. Order-preserving and de-duplicated.
+ */
+const UNION_ARRAY_KEYS = ["permissions", "host_permissions", "optional_permissions"];
+
+/**
+ * Merge a platform manifest over the base manifest. Most keys are replaced by the
+ * platform value (shallow), but permission-style array keys are unioned so
+ * platform manifests extend — rather than replace — the shared base permissions.
+ */
+export function mergeManifest(base, overrides) {
+  const manifest = { ...base, ...overrides };
+  for (const key of UNION_ARRAY_KEYS) {
+    if (Array.isArray(base[key]) || Array.isArray(overrides[key])) {
+      manifest[key] = [...new Set([...(base[key] ?? []), ...(overrides[key] ?? [])])];
+    }
+  }
+  return manifest;
+}
+
 async function buildTarget(target, baked) {
   const base = await readJson(join(srcDir, "manifest.base.json"));
   const overrides = await readJson(join(srcDir, `manifest.${target}.json`));
-  const manifest = { ...base, ...overrides };
+  const manifest = mergeManifest(base, overrides);
 
   const outDir = join(distDir, target);
   await rm(outDir, { recursive: true, force: true });
@@ -116,7 +140,11 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+// Only run the build when executed directly (e.g. `node scripts/build.mjs`),
+// so the pure `mergeManifest` helper can be imported by unit tests.
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}
