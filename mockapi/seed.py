@@ -465,6 +465,7 @@ def _seed_bills(session: Session) -> None:
     for i in range(1, NUM_BILLS + 1):
         vendor_id = 1 + (i % NUM_VENDORS)
         paid = "Paid" if i % 2 else "Unpaid"
+        gl_index = 1 + (i % 3)
         doc = {
             "Id": i,
             "Date": (_TODAY - timedelta(days=i * 3)).isoformat(),
@@ -475,12 +476,12 @@ def _seed_bills(session: Session) -> None:
             "ApprovalStatus": "Approved",
             "Lines": [
                 {
-                    "Id": i,
+                    "Id": i * 100 + 1,
                     "AccountingEntity": {
                         "Id": 1 + (i % NUM_PROPERTIES),
                         "AccountingEntityType": "Rental",
                     },
-                    "GLAccount": {"Id": 5001 + (i % 3), "Name": f"GL Account {1 + (i % 3)}"},
+                    "GLAccount": {"Id": 5000 + gl_index, "Name": f"GL Account {gl_index}"},
                     "Amount": 200.0 * i,
                     "Memo": "Service line",
                 }
