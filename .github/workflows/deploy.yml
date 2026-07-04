@@ -41,8 +41,34 @@ jobs:
         working-directory: extension
         run: npm run build
 
+      # The production .env (real Buildium credentials, Entra, and LLM keys) is
+      # kept on the runner host OUTSIDE the git checkout. actions/checkout cleans
+      # gitignored files from the workspace on every run, and .env is gitignored,
+      # so a .env placed in the workspace would be wiped before Compose runs.
+      # Docker Compose resolves the `env_file: .env` directives and the
+      # ${BUILDIUM_*} substitutions relative to the compose project directory
+      # (this checkout / $GITHUB_WORKSPACE), so copy the host .env in here first.
+      # Fail loudly if it is missing rather than silently deploying with the mock
+      # defaults baked into docker-compose.yml.
+      - name: Provision deploy .env
+        env:
+          # Optional override for the source .env path. When unset, default to
+          # the .env that lives alongside the self-hosted runner install
+          # (…/mcp-server-buildium/.env), three levels above $RUNNER_WORKSPACE
+          # (…/mcp-server-buildium/actions-runner/_work/<repo>).
+          BUILDIUM_ENV_FILE: ${{ vars.BUILDIUM_ENV_FILE }}
+        run: |
+          set -euo pipefail
+          env_src="${BUILDIUM_ENV_FILE:-$RUNNER_WORKSPACE/../../../.env}"
+          if [ ! -f "$env_src" ]; then
+            echo "::error::Deploy .env not found at '$env_src'. Place the production .env there, or set the BUILDIUM_ENV_FILE repository variable to its absolute path on the runner."
+            exit 1
+          fi
+          cp "$env_src" "$GITHUB_WORKSPACE/.env"
+          echo "Provisioned .env into the workspace from: $env_src"
+
       # (Re)build and start the HTTP MCP server via Docker Compose. Credentials
-      # and Entra/LLM settings are provided by a gitignored .env on the runner.
+      # and Entra/LLM settings come from the .env provisioned above.
       #
       # The build can intermittently fail on the long-lived self-hosted runner
       # with a BuildKit/containerd error such as:
