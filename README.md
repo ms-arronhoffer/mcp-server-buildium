@@ -315,7 +315,7 @@ both the assistant and operators.
 Every `update_*` tool automatically fetches the current record from Buildium
 before applying your changes. You only need to supply the fields you want to
 change; the server deep-merges them onto the current state and builds the full
-strict PUT schema internally. A single-field edit — "change the rent to $2 200" —
+strict PUT schema internally. A single-field edit — "change the rent to $2,200" —
 works without resupplying the tenant list, address, or any other required field.
 There is no risk of accidentally overwriting an unrelated field with a blank value.
 
