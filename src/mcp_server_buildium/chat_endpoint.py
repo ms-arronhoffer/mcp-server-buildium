@@ -32,6 +32,7 @@ from .security.policy import effective_policy_for_claims
 from .tools._common import list_tools_map
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
+    import httpx
     from fastmcp.server.auth.auth import TokenVerifier
 
     from .config import BuildiumConfig
@@ -123,6 +124,22 @@ def register_chat_routes(
     base_policy: ToolPolicy | None = None,
 ) -> None:
     """Register the ``/chat`` and ``/capabilities`` routes on the FastMCP app."""
+
+    # A single shared HTTP client is reused across all chat requests. Building a
+    # provider per request (via ``build_llm``) would otherwise lazily create a
+    # fresh ``httpx.AsyncClient`` on every turn that is never closed, leaking
+    # sockets/file descriptors until the server stops responding. The client is
+    # created lazily on first use and reused for the process lifetime; httpx
+    # ``AsyncClient`` instances are safe for concurrent use.
+    shared_client: httpx.AsyncClient | None = None
+
+    def _get_shared_client() -> httpx.AsyncClient:
+        import httpx
+
+        nonlocal shared_client
+        if shared_client is None:
+            shared_client = httpx.AsyncClient(timeout=60.0)
+        return shared_client
 
     # When an Entra App Role map is configured (with Entra auth), each chat turn
     # only advertises/executes tools the caller's role permits.
@@ -244,7 +261,7 @@ def register_chat_routes(
             result = await tool.run(args)
             return flatten_tool_result(result)
 
-        provider = build_llm(config, model=requested_model or None)
+        provider = build_llm(config, model=requested_model or None, client=_get_shared_client())
 
         async def event_stream():
             # Publish this request's attachments so in-process tools (e.g.
