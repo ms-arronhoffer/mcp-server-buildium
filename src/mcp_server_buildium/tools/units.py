@@ -57,11 +57,11 @@ def register_unit_tools(mcp: FastMCP, client: BuildiumClient) -> None:
         """Create a new rental unit."""
         return await c.create(
             "create_rental_unit",
-            "rental_unit_post_message",
-            "RentalUnitPostMessage",
+            "rental_units_post_message",
+            "RentalUnitsPostMessage",
             unit_data,
             lambda message: client.rental_units_api.external_api_rental_units_create_rental_unit(
-                rental_unit_post_message=message
+                rental_units_post_message=message
             ),
         )
 
@@ -109,12 +109,12 @@ def register_unit_tools(mcp: FastMCP, client: BuildiumClient) -> None:
         """Create a new association unit."""
         return await c.create(
             "create_association_unit",
-            "association_unit_post_message",
-            "AssociationUnitPostMessage",
+            "association_units_post_message",
+            "AssociationUnitsPostMessage",
             unit_data,
             lambda message: (
                 client.association_units_api.external_api_association_units_create_association_unit(
-                    association_unit_post_message=message
+                    association_units_post_message=message
                 )
             ),
         )
