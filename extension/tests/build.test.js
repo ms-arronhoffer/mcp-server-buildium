@@ -40,7 +40,7 @@ describe("mergeManifest", () => {
     expect(merged.name).toBe("chrome");
   });
 
-  it("gives the real Chrome build the alarms and notifications permissions the SW needs", async () => {
+  it("gives the real Chrome build the alarms and notifications permissions the service worker needs", async () => {
     const base = await readJson(join(srcDir, "manifest.base.json"));
     const chrome = await readJson(join(srcDir, "manifest.chrome.json"));
     const merged = mergeManifest(base, chrome);
