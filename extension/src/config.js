@@ -23,7 +23,11 @@ import { BAKED_CONFIG } from "./config.baked.js";
  * @property {boolean} notificationInPanel Show proactive notifications in panel
  * @property {boolean} notificationBrowser Show proactive browser notifications
  * @property {boolean} notificationChat Show proactive notifications as chat system messages
+ * @property {string} fontSize        Overall UI font size ("small"|"medium"|"large"|"xlarge")
  */
+
+/** Allowed values for the overall font-size preference. */
+export const FONT_SIZES = ["small", "medium", "large", "xlarge"];
 
 /** @type {ExtensionConfig} */
 export const DEFAULT_CONFIG = {
@@ -38,9 +42,12 @@ export const DEFAULT_CONFIG = {
   notificationInPanel: true,
   notificationBrowser: false,
   notificationChat: true,
+  fontSize: "medium",
 };
 
-const STORAGE_KEY = "buildium_mcp_config";
+/** Storage key under which the extension configuration is persisted. */
+export const CONFIG_STORAGE_KEY = "buildium_mcp_config";
+const STORAGE_KEY = CONFIG_STORAGE_KEY;
 
 /**
  * Keep only recognised, non-empty string fields from a partial config object.
@@ -107,6 +114,9 @@ export function validateConfig(cfg) {
   const poll = Number(cfg.notificationPollMinutes);
   if (Number.isFinite(poll) && (poll < 1 || poll > 1440)) {
     errors.push("Notification poll interval must be between 1 and 1440 minutes.");
+  }
+  if (cfg.fontSize != null && cfg.fontSize !== "" && !FONT_SIZES.includes(cfg.fontSize)) {
+    errors.push("Font size must be one of: " + FONT_SIZES.join(", ") + ".");
   }
   return errors;
 }

@@ -17,6 +17,7 @@ const FIELD_CONFIG = [
   { key: "notificationInPanel", type: "checkbox" },
   { key: "notificationBrowser", type: "checkbox" },
   { key: "notificationChat", type: "checkbox" },
+  { key: "fontSize", type: "select" },
 ];
 
 function el(id) {
@@ -65,6 +66,8 @@ el("settings-form").addEventListener("submit", async (event) => {
       cfg[field.key] = node.checked;
     } else if (field.type === "number") {
       cfg[field.key] = Number(node.value || DEFAULT_CONFIG[field.key]);
+    } else if (field.type === "select") {
+      cfg[field.key] = node.value;
     } else {
       cfg[field.key] = node.value.trim();
     }
