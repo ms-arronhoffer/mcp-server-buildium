@@ -39,6 +39,14 @@ ALL_CATEGORIES = frozenset(
         "bank_accounts",
         "general_ledger",
         "work_orders",
+        "documents",
+        "ownership_accounts",
+        "communications",
+        "budgets",
+        "reference",
+        "reports",
+        "close",
+        "alerts",
     }
 )
 
@@ -199,6 +207,18 @@ class BuildiumConfig(BaseSettings):
     llm_max_tool_rounds: int = Field(
         default=8,
         description="Maximum tool-call rounds per chat turn before the loop stops (>=1).",
+    )
+    llm_max_attachment_mb: int = Field(
+        default=10,
+        description=(
+            "Maximum size (in megabytes) of a single document a client may attach to a "
+            "/chat message for extraction (e.g. a lease PDF/DOCX/image). Larger files are "
+            "rejected with a 400."
+        ),
+    )
+    llm_max_attachments_per_request: int = Field(
+        default=5,
+        description="Maximum number of documents a client may attach to one /chat request.",
     )
     llm_openai_api_key: str | None = Field(
         default=None, description="API key for OpenAI (used when llm_provider='openai')."
@@ -552,5 +572,43 @@ class BuildiumConfig(BaseSettings):
             "Clicking it must trigger a lookup of exactly that record, so include its "
             "identifier in the action text.\n"
             "- Keep the visible label informative; put the precise, unambiguous lookup "
-            "instruction (including the id) inside the action link."
+            "instruction (including the id) inside the action link.\n"
+            "\n"
+            "Creating records from an uploaded document (document intake):\n"
+            "- When the user attaches a document (e.g. a lease, application, or invoice) "
+            "and asks to create a record, first identify the target object type. If it is "
+            "ambiguous, ask.\n"
+            "- Call the 'describe_create_schema' tool for that object type to get the exact "
+            "list of required and optional fields, then extract those field values from the "
+            "document, mapping them to the field names the schema lists.\n"
+            "- Before creating the primary object, check every referenced entity (tenant, "
+            "rental owner, property, unit, vendor, etc.) with the appropriate 'list_*'/'get_*' "
+            "tools. If a referenced entity does not already exist, tell the user and ALWAYS "
+            "ask for explicit confirmation before creating it; only create it after they "
+            "confirm, then use its returned Id in the parent object.\n"
+            "- Present the extracted fields back to the user as a clear Markdown summary, "
+            "explicitly flagging any missing or uncertain fields, and ask follow-up questions "
+            "to fill the gaps.\n"
+            "- Only call a 'create_*' tool after the user explicitly confirms. If a create "
+            "call returns a validation error listing missing fields, ask the user for those "
+            "specific fields and retry.\n"
+            "- After the object is created, offer to save the uploaded document to Buildium "
+            "and link it to the new record using 'save_uploaded_document' (use "
+            "'list_uploaded_documents' to see the available file names and "
+            "'list_file_categories' to choose a category).\n"
+            "\n"
+            "Generating a downloadable file (exports):\n"
+            "- When the user asks to export, download, or save data as a file — e.g. "
+            "'save me a spreadsheet of my active leases', 'create slides of my top "
+            "properties', or 'make a PDF report' — first gather the data with the "
+            "appropriate 'list_*'/'get_*' tools, then call 'create_download_file'.\n"
+            "- Choose the format from the request: 'csv' or 'xlsx' for a spreadsheet, "
+            "'pptx' for slides, 'docx' for a document, 'pdf' for a report. If the format "
+            "is ambiguous, pick a sensible default (xlsx for tabular data, pptx for "
+            "slides) or ask.\n"
+            "- Pass tabular data as 'columns' + 'rows'; narrative content as 'sections'; "
+            "slide content as 'slides'.\n"
+            "- The file is delivered to the user as a download link automatically; never "
+            "paste the file's raw contents into your reply. Simply confirm the file is "
+            "ready to download and briefly describe what it contains."
         )

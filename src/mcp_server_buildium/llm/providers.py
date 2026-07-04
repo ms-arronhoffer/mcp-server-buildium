@@ -11,7 +11,29 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from .attachments import Attachment, extract_text
 from .base import Completion, LLMProvider, Message, ToolCall, ToolSpec
+
+# ---------------------------------------------------------------------------
+# Shared: rendering a document attachment as a text fallback block
+# ---------------------------------------------------------------------------
+
+
+def _attachment_text_block(att: Attachment) -> str:
+    """Render an attachment's extracted text (or a notice) as a labelled string.
+
+    Used for document types that a provider cannot ingest natively (DOCX, plain
+    text, and PDFs when no PDF parser is available). Always prefixed with the
+    file name so the model can refer to the document by name (e.g. to save it).
+    """
+    text = extract_text(att)
+    if text:
+        return f"[Attached document: {att.name} ({att.media_type})]\n{text}"
+    return (
+        f"[Attached document: {att.name} ({att.media_type})] "
+        "could not be read as text on the server; ask the user for the details "
+        "you need from it."
+    )
 
 # ---------------------------------------------------------------------------
 # OpenAI (Chat Completions)
@@ -31,6 +53,37 @@ def openai_tools(tools: list[ToolSpec]) -> list[dict[str, Any]]:
         }
         for t in tools
     ]
+
+
+def openai_attachment_parts(attachments: list[Attachment]) -> list[dict[str, Any]]:
+    """Map attachments to OpenAI Chat Completions content parts. Pure.
+
+    Images become ``image_url`` parts (as data URLs); PDFs become ``file`` parts
+    with base64 ``file_data``; DOCX/text documents are extracted to text and
+    added as ``text`` parts (Chat Completions cannot ingest them natively).
+    """
+    parts: list[dict[str, Any]] = []
+    for att in attachments:
+        if att.is_image():
+            parts.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{att.media_type};base64,{att.data_b64}"},
+                }
+            )
+        elif att.is_pdf():
+            parts.append(
+                {
+                    "type": "file",
+                    "file": {
+                        "filename": att.name,
+                        "file_data": f"data:{att.media_type};base64,{att.data_b64}",
+                    },
+                }
+            )
+        else:
+            parts.append({"type": "text", "text": _attachment_text_block(att)})
+    return parts
 
 
 def openai_messages(messages: list[Message]) -> list[dict[str, Any]]:
@@ -64,6 +117,12 @@ def openai_messages(messages: list[Message]) -> list[dict[str, Any]]:
                     "content": m.get("content", ""),
                 }
             )
+        elif role == "user" and m.get("attachments"):
+            content: list[dict[str, Any]] = [
+                {"type": "text", "text": m.get("content") or ""}
+            ]
+            content.extend(openai_attachment_parts(m["attachments"]))
+            out.append({"role": "user", "content": content})
         else:
             out.append({"role": role, "content": m.get("content") or ""})
     return out
@@ -131,6 +190,42 @@ def anthropic_tools(tools: list[ToolSpec]) -> list[dict[str, Any]]:
     ]
 
 
+def anthropic_attachment_blocks(attachments: list[Attachment]) -> list[dict[str, Any]]:
+    """Map attachments to Anthropic content blocks. Pure.
+
+    Images become ``image`` blocks and PDFs become ``document`` blocks (both with
+    a base64 ``source``); DOCX/text documents are extracted to text ``text``
+    blocks (the Messages API does not ingest them natively).
+    """
+    blocks: list[dict[str, Any]] = []
+    for att in attachments:
+        if att.is_image():
+            blocks.append(
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": att.media_type,
+                        "data": att.data_b64,
+                    },
+                }
+            )
+        elif att.is_pdf():
+            blocks.append(
+                {
+                    "type": "document",
+                    "source": {
+                        "type": "base64",
+                        "media_type": att.media_type,
+                        "data": att.data_b64,
+                    },
+                }
+            )
+        else:
+            blocks.append({"type": "text", "text": _attachment_text_block(att)})
+    return blocks
+
+
 def anthropic_messages(messages: list[Message]) -> tuple[str, list[dict[str, Any]]]:
     """Split out the system prompt and map the rest to Anthropic messages. Pure.
 
@@ -145,9 +240,12 @@ def anthropic_messages(messages: list[Message]) -> tuple[str, list[dict[str, Any
             if m.get("content"):
                 system_parts.append(m["content"])
         elif role == "user":
-            out.append(
-                {"role": "user", "content": [{"type": "text", "text": m.get("content") or ""}]}
-            )
+            user_content: list[dict[str, Any]] = [
+                {"type": "text", "text": m.get("content") or ""}
+            ]
+            if m.get("attachments"):
+                user_content.extend(anthropic_attachment_blocks(m["attachments"]))
+            out.append({"role": "user", "content": user_content})
         elif role == "assistant":
             content: list[dict[str, Any]] = []
             if m.get("content"):
@@ -288,6 +386,23 @@ def gemini_tools(tools: list[ToolSpec]) -> list[dict[str, Any]]:
     ]
 
 
+def gemini_attachment_parts(attachments: list[Attachment]) -> list[dict[str, Any]]:
+    """Map attachments to Gemini content parts. Pure.
+
+    Images and PDFs become ``inline_data`` parts; DOCX/text documents are
+    extracted to text ``text`` parts (Gemini does not ingest them natively).
+    """
+    parts: list[dict[str, Any]] = []
+    for att in attachments:
+        if att.is_image() or att.is_pdf():
+            parts.append(
+                {"inline_data": {"mime_type": att.media_type, "data": att.data_b64}}
+            )
+        else:
+            parts.append({"text": _attachment_text_block(att)})
+    return parts
+
+
 def gemini_contents(messages: list[Message]) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
     """Split out the system instruction and map the rest to Gemini contents. Pure."""
     system_parts: list[str] = []
@@ -298,7 +413,10 @@ def gemini_contents(messages: list[Message]) -> tuple[dict[str, Any] | None, lis
             if m.get("content"):
                 system_parts.append(m["content"])
         elif role == "user":
-            contents.append({"role": "user", "parts": [{"text": m.get("content") or ""}]})
+            user_parts: list[dict[str, Any]] = [{"text": m.get("content") or ""}]
+            if m.get("attachments"):
+                user_parts.extend(gemini_attachment_parts(m["attachments"]))
+            contents.append({"role": "user", "parts": user_parts})
         elif role == "assistant":
             parts: list[dict[str, Any]] = []
             if m.get("content"):

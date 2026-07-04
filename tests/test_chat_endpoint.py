@@ -214,9 +214,7 @@ def test_authenticate_returns_verified_claims() -> None:
 def test_current_datetime_note_mentions_now_and_utc() -> None:
     from datetime import UTC, datetime
 
-    note = chat_endpoint._current_datetime_note(
-        datetime(2026, 7, 3, 19, 22, 29, tzinfo=UTC)
-    )
+    note = chat_endpoint._current_datetime_note(datetime(2026, 7, 3, 19, 22, 29, tzinfo=UTC))
     assert "2026-07-03T19:22:29Z" in note
     assert "UTC" in note
     assert "now" in note.lower()
@@ -241,3 +239,146 @@ def test_chat_system_prompt_includes_current_datetime(client, monkeypatch) -> No
     system = captured["messages"][0]
     assert system["role"] == "system"
     assert "current date and time is" in system["content"].lower()
+
+
+def test_chat_rejects_oversize_attachment(client) -> None:
+    """An attachment exceeding the size cap is rejected with a 400."""
+    import base64
+
+    big = base64.b64encode(b"x" * (11 * 1024 * 1024)).decode("ascii")
+    resp = client.post(
+        "/chat",
+        json={
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "save this",
+                    "attachments": [{"name": "big.txt", "media_type": "text/plain", "data": big}],
+                }
+            ]
+        },
+    )
+    assert resp.status_code == 400
+    assert "too large" in resp.json()["error"].lower()
+
+
+def test_chat_rejects_unsupported_attachment_type(client) -> None:
+    import base64
+
+    data = base64.b64encode(b"nope").decode("ascii")
+    resp = client.post(
+        "/chat",
+        json={
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "hi",
+                    "attachments": [
+                        {"name": "a.exe", "media_type": "application/octet-stream", "data": data}
+                    ],
+                }
+            ]
+        },
+    )
+    assert resp.status_code == 400
+
+
+def test_chat_threads_attachments_to_provider(client, monkeypatch) -> None:
+    """A valid attachment is decoded and passed to the provider on the user turn."""
+    import base64
+
+    captured: dict = {}
+
+    class StubProvider:
+        def __init__(self, *a, **k) -> None:
+            pass
+
+        async def complete(self, messages, tools):
+            captured["messages"] = messages
+            return Completion(content="Read it.")
+
+    monkeypatch.setattr(chat_endpoint, "build_provider", lambda *a, **k: StubProvider())
+
+    data = base64.b64encode(b"lease terms").decode("ascii")
+    resp = client.post(
+        "/chat",
+        json={
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "extract",
+                    "attachments": [
+                        {"name": "lease.txt", "media_type": "text/plain", "data": data}
+                    ],
+                }
+            ]
+        },
+    )
+    assert resp.status_code == 200
+    user_msg = next(m for m in captured["messages"] if m["role"] == "user")
+    assert user_msg["attachments"][0].name == "lease.txt"
+    assert user_msg["attachments"][0].data == b"lease terms"
+
+
+def test_chat_streams_artifact_for_generated_file(client, monkeypatch) -> None:
+    """A create_download_file tool call surfaces an `artifact` SSE event."""
+    completions = [
+        Completion(
+            content="",
+            tool_calls=[
+                ToolCall(
+                    "c1",
+                    "create_download_file",
+                    {
+                        "file_format": "csv",
+                        "filename": "active-leases",
+                        "columns": ["Lease", "Rent"],
+                        "rows": [[1, 1225]],
+                    },
+                )
+            ],
+        ),
+        Completion(content="Your spreadsheet is ready to download."),
+    ]
+
+    class StubProvider:
+        def __init__(self, *a, **k) -> None:
+            pass
+
+        async def complete(self, messages, tools):
+            return completions.pop(0)
+
+    monkeypatch.setattr(chat_endpoint, "build_provider", lambda *a, **k: StubProvider())
+
+    resp = client.post(
+        "/chat", json={"messages": [{"role": "user", "content": "export my leases"}]}
+    )
+    assert resp.status_code == 200
+    events = _sse_events(resp.text)
+    artifacts = [e for e in events if e["type"] == "artifact"]
+    assert len(artifacts) == 1
+    art = artifacts[0]
+    assert art["name"] == "active-leases.csv"
+    assert art["media_type"] == "text/csv"
+    assert art["size"] > 0
+    assert art["data"]  # base64 payload present
+    # Internal tool events are still hidden from the UI.
+    assert not [e for e in events if e["type"] in ("tool_call", "tool_result")]
+
+
+def test_chat_artifacts_do_not_leak_between_requests(client, monkeypatch) -> None:
+    """A turn that generates no file must not emit stale artifact events."""
+
+    class StubProvider:
+        def __init__(self, *a, **k) -> None:
+            pass
+
+        async def complete(self, messages, tools):
+            return Completion(content="No file this time.")
+
+    monkeypatch.setattr(chat_endpoint, "build_provider", lambda *a, **k: StubProvider())
+
+    resp = client.post("/chat", json={"messages": [{"role": "user", "content": "hi"}]})
+    assert resp.status_code == 200
+    events = _sse_events(resp.text)
+    assert not [e for e in events if e["type"] == "artifact"]

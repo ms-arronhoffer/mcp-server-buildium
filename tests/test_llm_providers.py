@@ -7,6 +7,9 @@ provider and that provider responses are parsed back into the neutral
 
 from __future__ import annotations
 
+import base64
+
+from mcp_server_buildium.llm.attachments import Attachment
 from mcp_server_buildium.llm.base import ToolCall
 from mcp_server_buildium.llm.providers import (
     anthropic_messages,
@@ -19,6 +22,17 @@ from mcp_server_buildium.llm.providers import (
     parse_gemini_response,
     parse_openai_response,
 )
+
+
+def _att(name: str, media_type: str, data: bytes) -> Attachment:
+    b64 = base64.b64encode(data).decode("ascii")
+    return Attachment(name=name, media_type=media_type, data=data, data_b64=b64)
+
+
+IMAGE_ATT = _att("pic.png", "image/png", b"\x89PNG")
+PDF_ATT = _att("lease.pdf", "application/pdf", b"%PDF-1.4")
+TEXT_ATT = _att("note.txt", "text/plain", b"hello world")
+
 
 TOOLS = [{"name": "list_leases", "description": "List leases", "inputSchema": {"type": "object"}}]
 
@@ -267,3 +281,55 @@ def test_gemini_contents_echoes_thought_signature() -> None:
 def test_gemini_contents_omits_absent_thought_signature() -> None:
     _system, contents = gemini_contents(CONVERSATION)
     assert "thoughtSignature" not in contents[1]["parts"][0]
+
+
+# --- Multimodal attachment mapping ----------------------------------------
+
+
+def test_openai_messages_maps_attachments() -> None:
+    messages = [
+        {"role": "user", "content": "extract this", "attachments": [IMAGE_ATT, PDF_ATT, TEXT_ATT]}
+    ]
+    out = openai_messages(messages)
+    content = out[0]["content"]
+    assert content[0] == {"type": "text", "text": "extract this"}
+    # Image -> image_url data URL.
+    assert content[1]["type"] == "image_url"
+    assert content[1]["image_url"]["url"].startswith("data:image/png;base64,")
+    # PDF -> file part with base64 file_data.
+    assert content[2]["type"] == "file"
+    assert content[2]["file"]["filename"] == "lease.pdf"
+    # Text/DOCX -> extracted text block.
+    assert content[3]["type"] == "text"
+    assert "hello world" in content[3]["text"]
+
+
+def test_openai_messages_without_attachments_stays_string() -> None:
+    out = openai_messages([{"role": "user", "content": "hi"}])
+    assert out[0] == {"role": "user", "content": "hi"}
+
+
+def test_anthropic_messages_maps_attachments() -> None:
+    _system, out = anthropic_messages(
+        [{"role": "user", "content": "read", "attachments": [IMAGE_ATT, PDF_ATT, TEXT_ATT]}]
+    )
+    blocks = out[0]["content"]
+    assert blocks[0] == {"type": "text", "text": "read"}
+    assert blocks[1]["type"] == "image"
+    assert blocks[1]["source"]["type"] == "base64"
+    assert blocks[1]["source"]["media_type"] == "image/png"
+    assert blocks[2]["type"] == "document"
+    assert blocks[2]["source"]["media_type"] == "application/pdf"
+    assert blocks[3]["type"] == "text"
+    assert "hello world" in blocks[3]["text"]
+
+
+def test_gemini_contents_maps_attachments() -> None:
+    _system, contents = gemini_contents(
+        [{"role": "user", "content": "look", "attachments": [IMAGE_ATT, PDF_ATT, TEXT_ATT]}]
+    )
+    parts = contents[0]["parts"]
+    assert parts[0] == {"text": "look"}
+    assert parts[1]["inline_data"]["mime_type"] == "image/png"
+    assert parts[2]["inline_data"]["mime_type"] == "application/pdf"
+    assert "text" in parts[3] and "hello world" in parts[3]["text"]

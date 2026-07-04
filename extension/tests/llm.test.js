@@ -67,6 +67,19 @@ describe("ChatClient", () => {
     vi.unstubAllGlobals();
   });
 
+  it("forwards message attachments in the request body", async () => {
+    const fetchMock = vi.fn(async () => streamResponse('data: {"type":"done","content":"ok"}\n'));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const attachments = [{ name: "lease.pdf", media_type: "application/pdf", data: "JVBERg==" }];
+    const chat = new ChatClient(config, async () => "t");
+    await chat.run([{ role: "user", content: "extract", attachments }]);
+
+    const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(sent.messages[0].attachments).toEqual(attachments);
+    vi.unstubAllGlobals();
+  });
+
   it("streams tokens and returns the final content", async () => {
     const sse =
       'data: {"type":"token","text":"Hello "}\n' +
@@ -103,6 +116,27 @@ describe("ChatClient", () => {
     expect(calls).toEqual([["list_leases", { limit: 5 }]]);
     expect(results).toEqual([["list_leases", '{"count":2}']]);
     expect(content).toBe("You have 2 leases.");
+    vi.unstubAllGlobals();
+  });
+
+  it("collects artifact events and returns them", async () => {
+    const sse =
+      'data: {"type":"token","text":"Your file is ready."}\n' +
+      'data: {"type":"done","content":"Your file is ready."}\n' +
+      'data: {"type":"artifact","name":"leases.csv","media_type":"text/csv","size":42,"data":"QUJD"}\n';
+    vi.stubGlobal("fetch", vi.fn(async () => streamResponse(sse)));
+
+    const seen = [];
+    const chat = new ChatClient(config, async () => "t");
+    const { content, artifacts } = await chat.run([{ role: "user", content: "export" }], {
+      onArtifact: (a) => seen.push(a),
+    });
+
+    expect(content).toBe("Your file is ready.");
+    expect(artifacts).toHaveLength(1);
+    expect(artifacts[0].name).toBe("leases.csv");
+    expect(artifacts[0].data).toBe("QUJD");
+    expect(seen).toEqual(artifacts);
     vi.unstubAllGlobals();
   });
 
