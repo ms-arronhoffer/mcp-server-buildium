@@ -10,7 +10,9 @@ import {
   addMessage,
   hideBanner,
   renderAssistantMarkdown,
+  setMessageKind,
   setConnection,
+  showLoadingMessage,
   showBanner,
 } from "./sidepanel_ui.js";
 import { AttachmentController } from "./sidepanel_attachments.js";
@@ -23,10 +25,24 @@ const els = {
   form: document.getElementById("composer"),
   input: document.getElementById("input"),
   send: document.getElementById("send-btn"),
+  retry: document.getElementById("retry-btn"),
+  clear: document.getElementById("clear-btn"),
   signin: document.getElementById("signin-btn"),
   settings: document.getElementById("settings-btn"),
   connDot: document.getElementById("conn-dot"),
+  connText: document.getElementById("conn-text"),
   banner: document.getElementById("status-banner"),
+  toast: document.getElementById("toast"),
+  onboarding: document.getElementById("onboarding"),
+  dismissOnboarding: document.getElementById("dismiss-onboarding-btn"),
+  insightsPanel: document.getElementById("insights-panel"),
+  insightsList: document.getElementById("insights-list"),
+  lastUpdated: document.getElementById("last-updated"),
+  toggleInsights: document.getElementById("toggle-insights-btn"),
+  quickActions: document.getElementById("quick-actions"),
+  viewControls: document.getElementById("view-controls"),
+  recentPrompts: document.getElementById("recent-prompts"),
+  composerError: document.getElementById("composer-error"),
   attachBtn: document.getElementById("attach-btn"),
   fileInput: document.getElementById("file-input"),
   attachments: document.getElementById("attachments"),
@@ -38,13 +54,35 @@ let chat = null;
 const history = [];
 const chatState = new ChatStateMachine();
 const artifactUrls = new ArtifactUrlStore();
+const PANEL_PREFS_KEY = "buildium_sidepanel_prefs";
+const MAX_RECENT_PROMPTS = 5;
+const MAX_INSIGHTS = 4;
+const MAX_PROMPT_CHARS = 2000;
+const QUICK_PROMPTS = [
+  "Show me today's highest-priority alerts.",
+  "Summarize leases with upcoming expirations in the next 60 days.",
+  "Draft tenant follow-up messages for overdue balances.",
+];
+
+const panelPrefs = {
+  view: "all",
+  onboardingDismissed: false,
+  insightsCollapsed: false,
+  recentPrompts: [],
+  draft: "",
+};
+
+let lastAttempt = "";
+let clearedSnapshot = null;
 
 const attachmentController = new AttachmentController(els.attachments, (text, isError) =>
   showBanner(els.banner, text, isError),
 );
 
 function addSystemMessage(text) {
-  addMessage(els.messages, "assistant", `ℹ ${text}`, "system");
+  const el = addMessage(els.messages, "assistant", `ℹ ${text}`, "system");
+  setMessageKind(el, "alerts");
+  applyViewFilter();
 }
 
 const notifications = new NotificationCenter({
@@ -54,6 +92,150 @@ const notifications = new NotificationCenter({
 
 function setBusy(isBusy) {
   els.send.disabled = isBusy;
+  els.retry.disabled = isBusy;
+}
+
+function nowLabel() {
+  return new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+function updateLastUpdated(label = `Updated ${nowLabel()}`) {
+  els.lastUpdated.textContent = label;
+}
+
+async function loadPanelPrefs() {
+  const saved = await api.storage.local.get(PANEL_PREFS_KEY);
+  Object.assign(panelPrefs, saved[PANEL_PREFS_KEY] || {});
+}
+
+async function savePanelPrefs() {
+  await api.storage.local.set({ [PANEL_PREFS_KEY]: panelPrefs });
+}
+
+function renderOnboarding() {
+  els.onboarding.classList.toggle("hidden", panelPrefs.onboardingDismissed);
+}
+
+function renderInsightsCollapsed() {
+  els.insightsPanel.classList.toggle("collapsed", !!panelPrefs.insightsCollapsed);
+  els.toggleInsights.textContent = panelPrefs.insightsCollapsed ? "Expand" : "Collapse";
+}
+
+function renderRecentPrompts() {
+  const prompts = panelPrefs.recentPrompts || [];
+  els.recentPrompts.innerHTML = "";
+  els.recentPrompts.classList.toggle("hidden", prompts.length === 0);
+  prompts.forEach((prompt) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "recent-prompt";
+    button.textContent = prompt;
+    button.addEventListener("click", () => {
+      els.input.value = prompt;
+      els.input.dispatchEvent(new Event("input"));
+      els.input.focus();
+    });
+    els.recentPrompts.appendChild(button);
+  });
+}
+
+function renderViewControls() {
+  const view = panelPrefs.view || "all";
+  for (const btn of els.viewControls.querySelectorAll(".view-btn")) {
+    btn.classList.toggle("active", btn.dataset.view === view);
+  }
+}
+
+function applyViewFilter() {
+  const view = panelPrefs.view || "all";
+  const items = els.messages.querySelectorAll(".msg");
+  for (const item of items) {
+    if (view === "all") {
+      item.classList.remove("hidden-by-filter");
+      continue;
+    }
+    const kind = item.dataset.kind || "chat";
+    const shouldShow = (view === "alerts" && kind === "alerts") || (view === "files" && kind === "files");
+    item.classList.toggle("hidden-by-filter", !shouldShow);
+  }
+}
+
+function setComposerError(message = "") {
+  els.composerError.textContent = message;
+  els.composerError.classList.toggle("hidden", !message);
+  els.input.classList.toggle("invalid", !!message);
+}
+
+function validateDraft(text, attachmentsCount = 0) {
+  const trimmed = text.trim();
+  if (!trimmed && attachmentsCount === 0) return "";
+  if (trimmed && trimmed.length < 3) return "Add a little more detail for better results.";
+  if (trimmed.length > MAX_PROMPT_CHARS) return `Message must be under ${MAX_PROMPT_CHARS} characters.`;
+  return "";
+}
+
+async function updateComposerValidation() {
+  const error = validateDraft(els.input.value, attachmentController.pending.length);
+  setComposerError(error);
+  els.send.disabled = !!error || chatState.state !== CHAT_STATES.IDLE;
+  panelPrefs.draft = els.input.value;
+  await savePanelPrefs();
+}
+
+function addInsight(text, tone = "neutral") {
+  if (!text) return;
+  const li = document.createElement("li");
+  li.className = `insight ${tone}`;
+  li.textContent = text;
+  els.insightsList.prepend(li);
+  while (els.insightsList.children.length > MAX_INSIGHTS) {
+    els.insightsList.lastElementChild?.remove();
+  }
+  updateLastUpdated();
+}
+
+function showToast(message, actionLabel, action) {
+  els.toast.innerHTML = "";
+  const text = document.createElement("span");
+  text.textContent = message;
+  els.toast.appendChild(text);
+  if (actionLabel && action) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "link";
+    btn.textContent = actionLabel;
+    btn.addEventListener("click", action);
+    els.toast.appendChild(btn);
+  }
+  els.toast.classList.remove("hidden");
+  window.setTimeout(() => els.toast.classList.add("hidden"), 7000);
+}
+
+function clearChatWithUndo() {
+  clearedSnapshot = { html: els.messages.innerHTML, history: [...history] };
+  els.messages.innerHTML = '<div class="empty">Conversation cleared. Use quick actions above to start again.</div>';
+  history.splice(0, history.length);
+  applyViewFilter();
+  showToast("Conversation cleared.", "Undo", () => {
+    if (!clearedSnapshot) return;
+    els.messages.innerHTML = clearedSnapshot.html;
+    history.splice(0, history.length, ...clearedSnapshot.history);
+    clearedSnapshot = null;
+    applyViewFilter();
+    showToast("Conversation restored.");
+  });
+  addInsight("Conversation was cleared.", "neutral");
+}
+
+function rememberPrompt(text) {
+  const trimmed = text.trim();
+  if (!trimmed) return;
+  panelPrefs.recentPrompts = [trimmed, ...(panelPrefs.recentPrompts || []).filter((v) => v !== trimmed)].slice(
+    0,
+    MAX_RECENT_PROMPTS,
+  );
+  renderRecentPrompts();
+  savePanelPrefs();
 }
 
 function notify(event) {
@@ -63,12 +245,14 @@ function notify(event) {
     browser: !!(config?.notificationBrowser && event.channels?.browser),
   };
   notifications.notify({ ...event, channels });
+  if (event?.severity === "error") addInsight(event.message, "error");
+  if (event?.type === "digest" || event?.type === "artifact_ready") addInsight(event.message, "info");
 }
 
 async function refreshSignInState() {
   const signedIn = await isSignedIn();
   els.signin.textContent = signedIn ? "Sign out" : "Sign in";
-  setConnection(els.connDot, signedIn ? "ok" : null);
+  setConnection(els.connDot, signedIn ? "ok" : null, els.connText);
   return signedIn;
 }
 
@@ -83,11 +267,13 @@ async function ensureReady() {
       dedupeKey: "config-required",
       channels: { banner: true, chat: false, browser: false },
     });
+    addInsight("Configuration is required before sending messages.", "error");
     return false;
   }
   hideBanner(els.banner);
   chat = new ChatClient(config, (opts) => getAccessToken(config, opts));
   await refreshSignInState();
+  updateLastUpdated();
   return true;
 }
 
@@ -96,24 +282,35 @@ async function handleSend(text) {
     return;
   }
   const attachments = attachmentController.pending;
+  const validationError = validateDraft(text, attachments.length);
+  if (validationError) {
+    setComposerError(validationError);
+    return;
+  }
   if (!text.trim() && attachments.length === 0) return;
   if (!(await ensureReady())) return;
 
+  els.input.value = "";
+  els.input.style.height = "auto";
   chatState.transition(CHAT_STATES.SENDING);
   setBusy(true);
+  setComposerError("");
+  lastAttempt = text;
 
   const consumedAttachments = attachmentController.consume();
   const userLabel =
     consumedAttachments.length > 0
       ? `${text}${text.trim() ? "\n" : ""}📎 ${consumedAttachments.map((a) => a.name).join(", ")}`
       : text;
-  addMessage(els.messages, "user", userLabel);
+  const userEl = addMessage(els.messages, "user", userLabel);
+  setMessageKind(userEl, "chat");
 
   const userMessage = { role: "user", content: text };
   if (consumedAttachments.length > 0) userMessage.attachments = consumedAttachments;
   history.push(userMessage);
 
-  const assistantEl = addMessage(els.messages, "assistant", "");
+  const assistantEl = showLoadingMessage(els.messages);
+  setMessageKind(assistantEl, "chat");
   let streamed = "";
 
   try {
@@ -121,6 +318,10 @@ async function handleSend(text) {
       onToken: (token) => {
         if (chatState.state === CHAT_STATES.SENDING) chatState.transition(CHAT_STATES.STREAMING);
         streamed += token;
+        if (assistantEl.classList.contains("loading")) {
+          assistantEl.classList.remove("loading");
+          assistantEl.textContent = "";
+        }
         assistantEl.textContent = streamed;
         els.messages.scrollTop = els.messages.scrollHeight;
       },
@@ -131,6 +332,7 @@ async function handleSend(text) {
       renderAssistantMarkdown(els.messages, assistantEl, finalText, (prompt) => handleSend(prompt));
     } else if (artifacts && artifacts.length > 0) {
       assistantEl.textContent = artifacts.length > 1 ? "Here are your files:" : "Here is your file:";
+      setMessageKind(assistantEl, "files");
     } else {
       assistantEl.textContent = "(no response)";
     }
@@ -144,6 +346,7 @@ async function handleSend(text) {
         channels: { banner: true, chat: false, browser: false },
       }),
     );
+    if (artifacts?.length) setMessageKind(assistantEl, "files");
 
     if (artifacts?.length) {
       notify({
@@ -156,8 +359,11 @@ async function handleSend(text) {
     }
 
     history.push({ role: "assistant", content: finalText });
-    setConnection(els.connDot, "ok");
+    setConnection(els.connDot, "ok", els.connText);
     chatState.transition(CHAT_STATES.COMPLETE);
+    rememberPrompt(text);
+    addInsight("Response received successfully.", "neutral");
+    els.retry.classList.add("hidden");
   } catch (err) {
     const normalized = normalizeError(err, "Chat request failed.");
     chatState.transition(CHAT_STATES.ERROR);
@@ -173,8 +379,10 @@ async function handleSend(text) {
       await signOut();
       await refreshSignInState();
     } else {
+      assistantEl.classList.remove("loading");
       assistantEl.textContent = `⚠ ${normalized.message}`;
-      setConnection(els.connDot, "err");
+      setMessageKind(assistantEl, "alerts");
+      setConnection(els.connDot, "err", els.connText);
       notify({
         type: normalized.type,
         severity: normalized.severity,
@@ -182,21 +390,23 @@ async function handleSend(text) {
         dedupeKey: `chat-error-${normalized.type}`,
         channels: { banner: true, chat: false, browser: false },
       });
+      els.retry.classList.remove("hidden");
     }
   } finally {
     setBusy(false);
     els.input.focus();
+    applyViewFilter();
+    updateLastUpdated();
     if (chatState.state === CHAT_STATES.COMPLETE || chatState.state === CHAT_STATES.ERROR) {
       chatState.transition(CHAT_STATES.IDLE);
     }
+    await updateComposerValidation();
   }
 }
 
 els.form.addEventListener("submit", (e) => {
   e.preventDefault();
   const text = els.input.value;
-  els.input.value = "";
-  els.input.style.height = "auto";
   handleSend(text);
 });
 
@@ -210,6 +420,7 @@ els.input.addEventListener("keydown", (e) => {
 els.input.addEventListener("input", () => {
   els.input.style.height = "auto";
   els.input.style.height = `${Math.min(els.input.scrollHeight, 160)}px`;
+  updateComposerValidation();
 });
 
 els.signin.addEventListener("click", async () => {
@@ -245,10 +456,58 @@ els.signin.addEventListener("click", async () => {
 });
 
 els.settings.addEventListener("click", () => api.runtime.openOptionsPage());
+els.retry.addEventListener("click", () => {
+  if (!lastAttempt) return;
+  els.input.value = lastAttempt;
+  els.form.requestSubmit();
+});
+els.clear.addEventListener("click", clearChatWithUndo);
 els.attachBtn.addEventListener("click", () => els.fileInput.click());
 els.fileInput.addEventListener("change", async () => {
   await attachmentController.addFiles(els.fileInput.files);
   els.fileInput.value = "";
+  await updateComposerValidation();
+});
+
+els.quickActions.addEventListener("click", (event) => {
+  const target = event.target.closest(".quick-action");
+  if (!target) return;
+  const prompt = target.dataset.prompt || "";
+  els.input.value = prompt;
+  els.input.dispatchEvent(new Event("input"));
+  els.form.requestSubmit();
+});
+
+els.viewControls.addEventListener("click", async (event) => {
+  const target = event.target.closest(".view-btn");
+  if (!target) return;
+  panelPrefs.view = target.dataset.view || "all";
+  renderViewControls();
+  applyViewFilter();
+  await savePanelPrefs();
+});
+
+els.dismissOnboarding.addEventListener("click", async () => {
+  panelPrefs.onboardingDismissed = true;
+  renderOnboarding();
+  await savePanelPrefs();
+});
+
+els.toggleInsights.addEventListener("click", async () => {
+  panelPrefs.insightsCollapsed = !panelPrefs.insightsCollapsed;
+  renderInsightsCollapsed();
+  await savePanelPrefs();
+});
+
+window.addEventListener("keydown", (event) => {
+  if (!event.altKey) return;
+  const idx = Number(event.key) - 1;
+  if (idx < 0 || idx >= QUICK_PROMPTS.length) return;
+  event.preventDefault();
+  const prompt = QUICK_PROMPTS[idx];
+  els.input.value = prompt;
+  els.input.dispatchEvent(new Event("input"));
+  els.form.requestSubmit();
 });
 
 api.runtime.onMessage.addListener((message) => {
@@ -275,6 +534,22 @@ function cleanupPanelLifecycle() {
 window.addEventListener("beforeunload", cleanupPanelLifecycle);
 window.addEventListener("pagehide", cleanupPanelLifecycle);
 
-els.messages.innerHTML = '<div class="empty">Ask a question to get started.</div>';
+async function init() {
+  await loadPanelPrefs();
+  renderOnboarding();
+  renderInsightsCollapsed();
+  renderRecentPrompts();
+  renderViewControls();
+  els.input.value = panelPrefs.draft || "";
+  els.input.dispatchEvent(new Event("input"));
+  els.retry.classList.add("hidden");
+  els.messages.innerHTML =
+    '<div class="empty">Ask a question to get started, or use a quick action above for common workflows.</div>';
+  applyViewFilter();
+  updateLastUpdated("Waiting for first update");
+  await updateComposerValidation();
+  await ensureReady();
+}
+
 api.runtime.sendMessage({ type: "panel_open" }).catch(() => undefined);
-ensureReady();
+init();

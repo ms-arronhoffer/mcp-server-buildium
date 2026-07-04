@@ -15,17 +15,32 @@ export function addMessage(messagesEl, role, text, extraClass = "") {
   return div;
 }
 
+export function setMessageKind(messageEl, kind) {
+  if (!messageEl) return;
+  if (kind) messageEl.dataset.kind = kind;
+}
+
+export function showLoadingMessage(messagesEl) {
+  const div = addMessage(messagesEl, "assistant", "", "loading");
+  div.innerHTML = '<span class="skeleton"></span><span class="skeleton"></span><span class="skeleton"></span>';
+  return div;
+}
+
 export function renderAssistantMarkdown(messagesEl, el, text, onAction) {
   el.textContent = "";
+  el.classList.remove("loading");
   el.classList.add("markdown");
   el.appendChild(renderMarkdown(text, onAction));
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
-export function setConnection(connDotEl, state) {
+export function setConnection(connDotEl, state, connTextEl = null) {
   connDotEl.classList.remove("ok", "err");
   if (state === "ok") connDotEl.classList.add("ok");
   if (state === "err") connDotEl.classList.add("err");
+  if (connTextEl) {
+    connTextEl.textContent = state === "ok" ? "Connected" : state === "err" ? "Issue detected" : "Offline";
+  }
 }
 
 export function showBanner(bannerEl, text, isError = false) {
