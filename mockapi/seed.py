@@ -4,6 +4,10 @@ Generates a realistic amount of related data (properties, units, leases,
 transactions, tenants, owners, applicants, vendors, tasks, bills, bank accounts,
 files, GL accounts, and work orders) so users can run the MCP tools against the
 mock and see meaningful, connected output.
+
+The values are intentionally realistic (real-sounding names, streets, cities and
+company names) while every field required by the Buildium OpenAPI schema stays
+populated so the data round-trips through the generated SDK models.
 """
 
 from __future__ import annotations
@@ -29,14 +33,111 @@ NUM_WORK_ORDERS = 10
 
 _TODAY = date(2026, 1, 15)
 
+# --- Realistic data pools ---------------------------------------------------
+# Deterministically indexed so referential integrity (by Id) is preserved.
+
+# Real-sounding people, used for tenants, owners, board members, managers, etc.
+_PEOPLE: list[tuple[str, str]] = [
+    ("Michael", "Thompson"),
+    ("Jennifer", "Martinez"),
+    ("David", "Nguyen"),
+    ("Sarah", "Patel"),
+    ("James", "Robinson"),
+    ("Emily", "Carter"),
+    ("Robert", "Kim"),
+    ("Jessica", "Alvarez"),
+    ("William", "O'Brien"),
+    ("Ashley", "Johnson"),
+    ("Christopher", "Reyes"),
+    ("Amanda", "Foster"),
+    ("Daniel", "Washington"),
+    ("Rachel", "Goldberg"),
+    ("Matthew", "Sullivan"),
+    ("Lauren", "Bennett"),
+    ("Andrew", "Torres"),
+    ("Megan", "Fisher"),
+    ("Joshua", "Coleman"),
+    ("Nicole", "Rivera"),
+    ("Brandon", "Murphy"),
+    ("Stephanie", "Hughes"),
+    ("Kevin", "Brooks"),
+    ("Olivia", "Sanders"),
+    ("Ryan", "Powell"),
+    ("Hannah", "Barnes"),
+    ("Justin", "Ross"),
+    ("Victoria", "Perry"),
+    ("Tyler", "Butler"),
+    ("Samantha", "Long"),
+]
+
+# Real US cities paired with their state and a plausible ZIP + area code.
+_LOCATIONS: list[tuple[str, str, str, str]] = [
+    ("Austin", "TX", "78701", "512"),
+    ("Denver", "CO", "80202", "303"),
+    ("Portland", "OR", "97205", "503"),
+    ("Seattle", "WA", "98104", "206"),
+    ("Nashville", "TN", "37203", "615"),
+    ("Columbus", "OH", "43215", "614"),
+    ("Raleigh", "NC", "27601", "919"),
+    ("Charlotte", "NC", "28202", "704"),
+    ("Atlanta", "GA", "30303", "404"),
+    ("Phoenix", "AZ", "85004", "602"),
+]
+
+_STREETS: list[str] = [
+    "Maple Avenue",
+    "Oak Street",
+    "Cedar Lane",
+    "Elm Street",
+    "Sunset Boulevard",
+    "Riverside Drive",
+    "Park Avenue",
+    "Highland Road",
+    "Washington Street",
+    "Lincoln Avenue",
+    "Birchwood Court",
+    "Magnolia Drive",
+]
+
+# Community-style names for rental properties.
+_PROPERTY_NAMES: list[str] = [
+    "Maplewood Apartments",
+    "Cedar Ridge Townhomes",
+    "Sunset Villas",
+    "Riverside Commons",
+    "Highland Park Residences",
+    "Oakmont Terrace",
+    "Willow Creek Flats",
+    "Birchwood Court Homes",
+    "Magnolia Gardens",
+    "Lincoln Square Lofts",
+]
+
+
+def _person(i: int) -> tuple[str, str]:
+    return _PEOPLE[(i - 1) % len(_PEOPLE)]
+
+
+def _email(first: str, last: str, i: int) -> str:
+    handle = f"{first}.{last}".lower().replace("'", "").replace(" ", "")
+    return f"{handle}{i}@example.com"
+
+
+def _phone(i: int) -> str:
+    _, _, _, area = _LOCATIONS[(i - 1) % len(_LOCATIONS)]
+    # 555-01xx is the range reserved for fictional use.
+    return f"({area}) 555-{100 + (i % 100):04d}"
+
 
 def _addr(i: int) -> dict:
+    city, state, base_zip, _ = _LOCATIONS[(i - 1) % len(_LOCATIONS)]
+    street = _STREETS[(i - 1) % len(_STREETS)]
     return {
-        "AddressLine1": f"{100 + i} Market Street",
+        "AddressLine1": f"{100 + i * 7} {street}",
         "AddressLine2": f"Suite {i}" if i % 3 == 0 else None,
-        "City": "Springfield",
-        "State": "IL",
-        "PostalCode": f"627{i:02d}",
+        "City": city,
+        "State": state,
+        "PostalCode": base_zip,
         "Country": "UnitedStates",
     }
 
@@ -44,9 +145,10 @@ def _addr(i: int) -> dict:
 def _seed_properties(session: Session) -> list[dict]:
     props = []
     for i in range(1, NUM_PROPERTIES + 1):
+        mgr_first, mgr_last = _person(i + 20)
         doc = {
             "Id": i,
-            "Name": f"Rental Property {i}",
+            "Name": _PROPERTY_NAMES[(i - 1) % len(_PROPERTY_NAMES)],
             "StructureDescription": "Single family home" if i % 2 else "Duplex",
             "NumberUnits": UNITS_PER_PROPERTY,
             "IsActive": True,
@@ -56,7 +158,7 @@ def _seed_properties(session: Session) -> list[dict]:
             "YearBuilt": 1980 + i,
             "RentalType": "Residential",
             "RentalSubType": "SingleFamily" if i % 2 else "MultiFamily",
-            "RentalManager": {"Id": 1, "FirstName": "Dana", "LastName": "Rivera"},
+            "RentalManager": {"Id": 1, "FirstName": mgr_first, "LastName": mgr_last},
         }
         create_doc(session, "rentals", doc, entity_id=i, status="Active")
         props.append(doc)
@@ -67,14 +169,17 @@ def _seed_units(session: Session) -> list[dict]:
     units = []
     unit_id = 1
     for pid in range(1, NUM_PROPERTIES + 1):
+        building = _PROPERTY_NAMES[(pid - 1) % len(_PROPERTY_NAMES)]
         for u in range(1, UNITS_PER_PROPERTY + 1):
             occupied = (unit_id % 3) != 0
             doc = {
                 "Id": unit_id,
                 "PropertyId": pid,
-                "BuildingName": f"Building {pid}",
+                "BuildingName": building,
                 "UnitNumber": f"{u}0{pid}",
-                "Description": f"Unit {u} at property {pid}",
+                "Description": (
+                    f"{['Studio', 'One-bedroom', 'Two-bedroom'][u % 3]} unit at {building}"
+                ),
                 "MarketRent": 1200.0 + 50 * unit_id,
                 "Address": _addr(pid),
                 "UnitBedrooms": "TwoBed",
@@ -102,15 +207,16 @@ def _seed_unit_listings(session: Session, units: list[dict]) -> None:
     for unit in units:
         if not unit["IsUnitListed"]:
             continue
+        building = unit["BuildingName"]
         doc = {
             "Id": listing_id,
             "UnitId": unit["Id"],
             "PropertyId": unit["PropertyId"],
             "IsActive": True,
             "AvailableDate": (_TODAY + timedelta(days=14)).isoformat(),
-            "ContactName": "Leasing Office",
-            "ContactPhoneNumber": {"Number": "555-0100", "Type": "Office"},
-            "ContactEmail": "leasing@example.com",
+            "ContactName": f"{building} Leasing Office",
+            "ContactPhoneNumber": {"Number": _phone(listing_id), "Type": "Office"},
+            "ContactEmail": "leasing@rockford-pm.com",
             "Rent": unit["MarketRent"],
         }
         create_doc(
@@ -130,6 +236,7 @@ def _seed_leases(session: Session, units: list[dict]) -> list[dict]:
         unit = units[(i - 1) % len(units)]
         status = ["Active", "Active", "Past", "Future"][i % 4]
         start = _TODAY - timedelta(days=365 - i * 5)
+        first, last = _person(i)
         doc = {
             "Id": i,
             "PropertyId": unit["PropertyId"],
@@ -148,7 +255,7 @@ def _seed_leases(session: Session, units: list[dict]) -> list[dict]:
             "AutomaticallyMoveOutTenants": False,
             "CreatedDateTime": start.isoformat() + "T00:00:00Z",
             "LastUpdatedDateTime": _TODAY.isoformat() + "T00:00:00Z",
-            "CurrentTenants": [{"Id": i, "FirstName": f"Tenant{i}", "LastName": "Doe"}],
+            "CurrentTenants": [{"Id": i, "FirstName": first, "LastName": last}],
         }
         create_doc(
             session,
@@ -167,14 +274,15 @@ def _seed_leases(session: Session, units: list[dict]) -> list[dict]:
 def _seed_lease_transactions(session: Session, lease_id: int) -> None:
     for t in range(1, 4):
         tx_id = lease_id * 100 + t
+        is_charge = bool(t % 2)
         doc = {
             "Id": tx_id,
             "Date": (_TODAY - timedelta(days=30 * t)).isoformat(),
-            "TransactionType": "Charge" if t % 2 else "Payment",
-            "TotalAmount": 1200.0 if t % 2 else -1200.0,
-            "CheckNumber": None,
+            "TransactionType": "Charge" if is_charge else "Payment",
+            "TotalAmount": 1200.0 if is_charge else -1200.0,
+            "CheckNumber": None if is_charge else f"{1000 + tx_id}",
             "LeaseId": lease_id,
-            "Memo": f"Monthly {'rent charge' if t % 2 else 'payment'}",
+            "Memo": "Monthly rent charge" if is_charge else "Rent payment received",
         }
         create_doc(
             session,
@@ -189,12 +297,13 @@ def _seed_lease_transactions(session: Session, lease_id: int) -> None:
 def _seed_lease_tenants(session: Session, leases: list[dict]) -> None:
     for lease in leases:
         tid = lease["Id"]
+        first, last = _person(tid)
         doc = {
             "Id": tid,
-            "FirstName": f"Tenant{tid}",
-            "LastName": "Doe",
-            "Email": f"tenant{tid}@example.com",
-            "PhoneNumbers": [{"Number": f"555-02{tid:02d}", "Type": "Cell"}],
+            "FirstName": first,
+            "LastName": last,
+            "Email": _email(first, last, tid),
+            "PhoneNumbers": [{"Number": _phone(tid), "Type": "Cell"}],
             "PropertyId": lease["PropertyId"],
             "UnitId": lease["UnitId"],
             "Leases": [{"Id": lease["Id"], "LeaseStatus": lease["LeaseStatus"]}],
@@ -210,15 +319,25 @@ def _seed_lease_tenants(session: Session, leases: list[dict]) -> None:
         )
 
 
+# Community-style names for homeowners associations.
+_HOA_NAMES: list[str] = [
+    "Willow Creek Homeowners Association",
+    "Stonebridge Community Association",
+    "Lakeside Villas HOA",
+    "Prairie Ridge Homeowners Association",
+]
+
+
 def _seed_associations(session: Session) -> list[dict]:
     assocs = []
     for i in range(1, NUM_ASSOCIATIONS + 1):
+        name = _HOA_NAMES[(i - 1) % len(_HOA_NAMES)]
         doc = {
             "Id": i,
-            "Name": f"Homeowners Association {i}",
+            "Name": name,
             "IsActive": True,
             "Reserve": 10000.0 * i,
-            "Description": f"HOA number {i}",
+            "Description": f"{name} managing {2 + i} residential buildings",
             "YearBuilt": 1990 + i,
             "OperatingBankAccountId": 1 + (i % NUM_BANK_ACCOUNTS),
             "Address": _addr(i),
@@ -238,7 +357,7 @@ def _seed_association_children(session: Session, association_id: int) -> None:
         doc = {
             "Id": uid,
             "AssociationId": association_id,
-            "UnitNumber": f"A{uid}",
+            "UnitNumber": f"{chr(64 + association_id)}-{100 + u}",
             "Address": _addr(uid),
             "UnitBedrooms": "TwoBed",
             "UnitBathrooms": "TwoBath",
@@ -253,12 +372,13 @@ def _seed_association_children(session: Session, association_id: int) -> None:
     # Board members
     for b in range(1, 3):
         bid = association_id * 10 + b
+        first, last = _person(bid + 10)
         doc = {
             "Id": bid,
             "AssociationId": association_id,
-            "FirstName": f"Board{bid}",
-            "LastName": "Member",
-            "Email": f"board{bid}@example.com",
+            "FirstName": first,
+            "LastName": last,
+            "Email": _email(first, last, bid),
             "Title": "President" if b == 1 else "Treasurer",
             "IsActive": True,
         }
@@ -286,31 +406,33 @@ def _seed_association_children(session: Session, association_id: int) -> None:
     )
     # Association tenants
     tid = association_id
+    at_first, at_last = _person(tid + 4)
     create_doc(
         session,
         "association_tenants",
         {
             "Id": tid,
             "AssociationId": association_id,
-            "FirstName": f"AssocTenant{tid}",
-            "LastName": "Smith",
-            "Email": f"assoctenant{tid}@example.com",
-            "PhoneNumbers": [{"Number": f"555-03{tid:02d}", "Type": "Cell"}],
+            "FirstName": at_first,
+            "LastName": at_last,
+            "Email": _email(at_first, at_last, tid),
+            "PhoneNumbers": [{"Number": _phone(tid + 4), "Type": "Cell"}],
             "PrimaryAddress": _addr(tid),
         },
         entity_id=tid,
         association_id=association_id,
     )
     # Association owners
+    ao_first, ao_last = _person(association_id + 8)
     create_doc(
         session,
         "association_owners",
         {
             "Id": association_id,
             "AssociationId": association_id,
-            "FirstName": f"AssocOwner{association_id}",
-            "LastName": "Jones",
-            "Email": f"assocowner{association_id}@example.com",
+            "FirstName": ao_first,
+            "LastName": ao_last,
+            "Email": _email(ao_first, ao_last, association_id),
             "PrimaryAddress": _addr(association_id),
         },
         entity_id=association_id,
@@ -320,26 +442,31 @@ def _seed_association_children(session: Session, association_id: int) -> None:
 
 def _seed_rental_owners(session: Session) -> None:
     for i in range(1, NUM_PROPERTIES + 1):
+        first, last = _person(i + 12)
+        is_company = i % 4 == 0
         doc = {
             "Id": i,
-            "FirstName": f"Owner{i}",
-            "LastName": "Property",
-            "Email": f"owner{i}@example.com",
-            "IsCompany": i % 4 == 0,
+            "FirstName": first,
+            "LastName": last,
+            "Email": _email(first, last, i + 12),
+            "IsCompany": is_company,
             "PropertyIds": [i],
-            "Address": _addr(i),
+            "Address": _addr(i + 12),
         }
+        if is_company:
+            doc["CompanyName"] = f"{last} Property Holdings LLC"
         create_doc(session, "rental_owners", doc, entity_id=i, property_id=i)
 
 
 def _seed_applicants(session: Session) -> None:
     for i in range(1, NUM_APPLICANTS + 1):
+        first, last = _person(i + 15)
         doc = {
             "Id": i,
-            "FirstName": f"Applicant{i}",
-            "LastName": "Prospect",
-            "Email": f"applicant{i}@example.com",
-            "PhoneNumber": f"555-03{i:02d}",
+            "FirstName": first,
+            "LastName": last,
+            "Email": _email(first, last, i + 15),
+            "PhoneNumber": _phone(i + 15),
             "Status": ["Undecided", "Approved", "Rejected"][i % 3],
         }
         create_doc(session, "applicants", doc, entity_id=i)
@@ -365,7 +492,7 @@ def _seed_applicants(session: Session) -> None:
             "applicant_groups",
             {
                 "Id": g,
-                "Name": f"Applicant Group {g}",
+                "Name": f"{_person(g)[1]} Household",
                 "PropertyId": g,
                 "ApplicantIds": [g, g + 3],
             },
@@ -373,28 +500,71 @@ def _seed_applicants(session: Session) -> None:
         )
 
 
+# Trade categories and matching company names for vendors.
+_VENDOR_CATEGORIES: list[str] = ["Plumbing", "Electrical", "Landscaping"]
+_VENDOR_COMPANIES: list[str] = [
+    "Precision Plumbing Services",
+    "BrightSpark Electric Co.",
+    "Evergreen Landscaping LLC",
+    "Reliable Roofing & Repair",
+    "Summit HVAC Solutions",
+    "ClearView Window Cleaning",
+    "Apex General Contractors",
+    "Metro Pest Control Inc.",
+]
+
+
 def _seed_vendors(session: Session) -> None:
     for c in range(1, 4):
         create_doc(
             session,
             "vendor_categories",
-            {"Id": c, "Name": f"Vendor Category {c}"},
+            {"Id": c, "Name": _VENDOR_CATEGORIES[(c - 1) % len(_VENDOR_CATEGORIES)]},
             entity_id=c,
         )
     for i in range(1, NUM_VENDORS + 1):
         status = "Active" if i % 5 else "Inactive"
+        cat_id = 1 + (i % 3)
+        company = _VENDOR_COMPANIES[(i - 1) % len(_VENDOR_COMPANIES)]
+        handle = (
+            company.lower().replace(" ", "").replace("&", "and").replace(".", "").replace(",", "")
+        )
         doc = {
             "Id": i,
             "IsCompany": True,
-            "CompanyName": f"Vendor Co {i}",
+            "CompanyName": company,
             "FirstName": None,
             "LastName": None,
-            "Email": f"vendor{i}@example.com",
-            "Category": {"Id": 1 + (i % 3), "Name": f"Vendor Category {1 + (i % 3)}"},
+            "Email": f"contact@{handle}.com",
+            "Category": {
+                "Id": cat_id,
+                "Name": _VENDOR_CATEGORIES[(cat_id - 1) % len(_VENDOR_CATEGORIES)],
+            },
             "IsActive": status == "Active",
             "Address": _addr(i),
         }
         create_doc(session, "vendors", doc, entity_id=i, vendor_id=i, status=status)
+
+
+# Task categories and realistic maintenance/inspection task descriptions.
+_TASK_CATEGORIES: list[str] = ["Maintenance", "Inspection", "Administrative"]
+_TASK_TITLES: list[str] = [
+    "Repair leaking kitchen faucet",
+    "Replace HVAC air filter",
+    "Inspect smoke and CO detectors",
+    "Fix loose stair railing",
+    "Service garbage disposal",
+    "Repaint hallway walls",
+    "Unclog bathroom drain",
+    "Replace broken window screen",
+    "Test water heater pressure valve",
+    "Repair garage door opener",
+    "Clean and inspect gutters",
+    "Replace worn carpet in living room",
+    "Fix flickering porch light",
+    "Reseal bathroom grout",
+    "Trim overgrown landscaping",
+]
 
 
 def _seed_tasks(session: Session) -> None:
@@ -402,17 +572,22 @@ def _seed_tasks(session: Session) -> None:
         create_doc(
             session,
             "task_categories",
-            {"Id": c, "Name": f"Task Category {c}"},
+            {"Id": c, "Name": _TASK_CATEGORIES[(c - 1) % len(_TASK_CATEGORIES)]},
             entity_id=c,
         )
     statuses = ["New", "InProgress", "Completed", "Deferred", "Closed"]
     for i in range(1, NUM_TASKS + 1):
         status = statuses[i % len(statuses)]
+        cat_id = 1 + (i % 3)
+        title = _TASK_TITLES[(i - 1) % len(_TASK_TITLES)]
         doc = {
             "Id": i,
-            "Title": f"Task {i}",
-            "Description": f"Description for task {i}",
-            "Category": {"Id": 1 + (i % 3), "Name": f"Task Category {1 + (i % 3)}"},
+            "Title": title,
+            "Description": f"{title} reported by resident; schedule with maintenance team.",
+            "Category": {
+                "Id": cat_id,
+                "Name": _TASK_CATEGORIES[(cat_id - 1) % len(_TASK_CATEGORIES)],
+            },
             "TaskStatus": status,
             "Priority": ["Low", "Normal", "High"][i % 3],
             "PropertyId": 1 + (i % NUM_PROPERTIES),
@@ -422,16 +597,23 @@ def _seed_tasks(session: Session) -> None:
         create_doc(session, "tasks", doc, entity_id=i, status=status)
 
 
+_BANK_ACCOUNT_NAMES: list[str] = [
+    "Operating Account - First National Bank",
+    "Security Deposit Trust - Community Bank",
+    "Reserve Account - Heartland Credit Union",
+]
+
+
 def _seed_bank_accounts(session: Session) -> None:
     for i in range(1, NUM_BANK_ACCOUNTS + 1):
         status = "Active"
         doc = {
             "Id": i,
-            "Name": f"Operating Account {i}",
+            "Name": _BANK_ACCOUNT_NAMES[(i - 1) % len(_BANK_ACCOUNT_NAMES)],
             "BankAccountType": "Checking",
             "Country": "UnitedStates",
-            "AccountNumberUnmasked": f"00000{i}",
-            "AccountNumber": f"****{i}",
+            "AccountNumberUnmasked": f"1000{i:04d}",
+            "AccountNumber": f"****{i:04d}",
             "RoutingNumber": "021000021",
             "IsActive": True,
             "Balance": 25000.0 * i,
@@ -444,6 +626,7 @@ def _seed_bank_accounts(session: Session) -> None:
         create_doc(session, "bank_accounts", doc, entity_id=i, status=status)
         for t in range(1, 4):
             tx_id = i * 100 + t
+            is_deposit = bool(t % 2)
             create_doc(
                 session,
                 "bank_transactions",
@@ -451,9 +634,9 @@ def _seed_bank_accounts(session: Session) -> None:
                     "Id": tx_id,
                     "BankAccountId": i,
                     "Date": (_TODAY - timedelta(days=t * 7)).isoformat(),
-                    "TransactionType": "Deposit" if t % 2 else "Withdrawal",
-                    "TotalAmount": 500.0 * t if t % 2 else -250.0 * t,
-                    "Memo": f"Transaction {t} for account {i}",
+                    "TransactionType": "Deposit" if is_deposit else "Withdrawal",
+                    "TotalAmount": 500.0 * t if is_deposit else -250.0 * t,
+                    "Memo": "Tenant rent deposit" if is_deposit else "Vendor payment",
                 },
                 entity_id=tx_id,
                 parent_type="bank_account",
@@ -461,18 +644,35 @@ def _seed_bank_accounts(session: Session) -> None:
             )
 
 
+# GL accounts with realistic names paired to their account type.
+_GL_ACCOUNTS: list[tuple[str, str]] = [
+    ("Cash - Operating", "Asset"),
+    ("Accounts Receivable", "Asset"),
+    ("Security Deposits Held", "Liability"),
+    ("Accounts Payable", "Liability"),
+    ("Owner Equity", "Equity"),
+    ("Rental Income", "Income"),
+    ("Late Fee Income", "Income"),
+    ("Repairs and Maintenance", "Expense"),
+    ("Property Insurance", "Expense"),
+    ("Landscaping Expense", "Expense"),
+]
+
+
 def _seed_bills(session: Session) -> None:
     for i in range(1, NUM_BILLS + 1):
         vendor_id = 1 + (i % NUM_VENDORS)
         paid = "Paid" if i % 2 else "Unpaid"
-        gl_index = 1 + (i % 3)
+        # Bill expenses map onto the expense GL accounts (indices 8-10 above).
+        gl_id = 5008 + ((i - 1) % 3)
+        gl_name = _GL_ACCOUNTS[7 + ((i - 1) % 3)][0]
         doc = {
             "Id": i,
             "Date": (_TODAY - timedelta(days=i * 3)).isoformat(),
             "DueDate": (_TODAY + timedelta(days=i)).isoformat(),
             "VendorId": vendor_id,
-            "ReferenceNumber": f"BILL-{i:04d}",
-            "Memo": f"Bill {i}",
+            "ReferenceNumber": f"INV-2026{i:04d}",
+            "Memo": f"Invoice from {_VENDOR_COMPANIES[(vendor_id - 1) % len(_VENDOR_COMPANIES)]}",
             "ApprovalStatus": "Approved",
             "Lines": [
                 {
@@ -481,9 +681,9 @@ def _seed_bills(session: Session) -> None:
                         "Id": 1 + (i % NUM_PROPERTIES),
                         "AccountingEntityType": "Rental",
                     },
-                    "GLAccount": {"Id": 5000 + gl_index, "Name": f"GL Account {gl_index}"},
+                    "GLAccount": {"Id": gl_id, "Name": gl_name},
                     "Amount": 200.0 * i,
-                    "Memo": "Service line",
+                    "Memo": f"{gl_name} charge",
                 }
             ],
         }
@@ -506,21 +706,36 @@ def _seed_bills(session: Session) -> None:
             )
 
 
+_FILE_CATEGORIES: list[str] = ["Leases", "Inspections", "Insurance"]
+_FILE_TITLES: list[str] = [
+    "Signed Lease Agreement",
+    "Move-in Inspection Report",
+    "Certificate of Insurance",
+    "Property Condition Report",
+    "Rent Ledger Statement",
+    "Maintenance Work Summary",
+    "Renewal Offer Letter",
+    "Move-out Inspection Report",
+]
+
+
 def _seed_files(session: Session) -> None:
     for c in range(1, 4):
         create_doc(
             session,
             "file_categories",
-            {"Id": c, "Name": f"File Category {c}"},
+            {"Id": c, "Name": _FILE_CATEGORIES[(c - 1) % len(_FILE_CATEGORIES)]},
             entity_id=c,
         )
     for i in range(1, 9):
+        title = _FILE_TITLES[(i - 1) % len(_FILE_TITLES)]
+        slug = title.lower().replace(" ", "_")
         doc = {
             "Id": i,
-            "Title": f"Document {i}.pdf",
-            "PhysicalFileName": f"document_{i}.pdf",
+            "Title": f"{title}.pdf",
+            "PhysicalFileName": f"{slug}_{i}.pdf",
             "CategoryId": 1 + (i % 3),
-            "Description": f"Seeded file {i}",
+            "Description": f"{title} for property {1 + (i % NUM_PROPERTIES)}",
             "ContentType": "application/pdf",
             "Size": 1024 * i,
             "EntityType": "Rental",
@@ -530,18 +745,18 @@ def _seed_files(session: Session) -> None:
 
 
 def _seed_general_ledger(session: Session) -> None:
-    types = ["Asset", "Liability", "Equity", "Income", "Expense"]
     for i in range(1, 11):
         acct_id = 5000 + i
+        name, acct_type = _GL_ACCOUNTS[(i - 1) % len(_GL_ACCOUNTS)]
         doc = {
             "Id": acct_id,
             "AccountNumber": f"{1000 + i}",
-            "Name": f"GL Account {i}",
-            "Type": types[i % len(types)],
+            "Name": name,
+            "Type": acct_type,
             "IsDefaultGLAccount": False,
             "IsActive": True,
         }
-        create_doc(session, "gl_accounts", doc, entity_id=acct_id, status=types[i % len(types)])
+        create_doc(session, "gl_accounts", doc, entity_id=acct_id, status=acct_type)
     for i in range(1, 21):
         tx_id = 9000 + i
         doc = {
@@ -549,7 +764,7 @@ def _seed_general_ledger(session: Session) -> None:
             "Date": (_TODAY - timedelta(days=i)).isoformat(),
             "TransactionType": "Bill" if i % 2 else "Payment",
             "TotalAmount": 150.0 * i,
-            "Memo": f"GL transaction {i}",
+            "Memo": "Vendor bill posted" if i % 2 else "Owner distribution",
             "Journal": {"Lines": [{"GLAccountId": 5001 + (i % 10), "Amount": 150.0 * i}]},
         }
         create_doc(
@@ -560,13 +775,27 @@ def _seed_general_ledger(session: Session) -> None:
         )
 
 
+_WORK_ORDER_TITLES: list[str] = [
+    "Repair burst pipe under kitchen sink",
+    "Restore power to bedroom outlets",
+    "Replace damaged roof shingles",
+    "Service non-heating furnace",
+    "Fix jammed garage door",
+    "Replace cracked bathroom tile",
+    "Repair broken exterior gate lock",
+    "Clear blocked sewer line",
+    "Replace failed water heater",
+    "Patch and paint water-damaged ceiling",
+]
+
+
 def _seed_work_orders(session: Session) -> None:
     statuses = ["New", "InProgress", "Completed", "Deferred", "Closed"]
     for i in range(1, NUM_WORK_ORDERS + 1):
         status = statuses[i % len(statuses)]
         doc = {
             "Id": i,
-            "Title": f"Work Order {i}",
+            "Title": _WORK_ORDER_TITLES[(i - 1) % len(_WORK_ORDER_TITLES)],
             "WorkOrderStatus": status,
             "Priority": ["Low", "Normal", "High"][i % 3],
             "EntryAllowed": "Yes",

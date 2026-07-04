@@ -188,7 +188,7 @@ def test_list_result_has_timing_meta(tools, run):
 def test_partial_rental_tenant_phone_update(tools, run):
     """Updating only a phone number must not require the full tenant schema."""
     before = _ok(run(tools["get_rental_tenant"].fn(tenant_id=1)))
-    assert before["data"]["FirstName"] == "Tenant1"
+    assert before["data"]["FirstName"] == "Michael"
 
     result = _ok(
         run(
@@ -198,8 +198,8 @@ def test_partial_rental_tenant_phone_update(tools, run):
         )
     )
     # Required fields were preserved from the existing record.
-    assert result["data"]["FirstName"] == "Tenant1"
-    assert result["data"]["LastName"] == "Doe"
+    assert result["data"]["FirstName"] == "Michael"
+    assert result["data"]["LastName"] == "Thompson"
     # The mobile number is present after the update (list form in the response).
     numbers = {p["Number"] for p in result["data"]["PhoneNumbers"]}
     assert "555-867-5309" in numbers
@@ -214,7 +214,7 @@ def test_partial_association_tenant_phone_update(tools, run):
             )
         )
     )
-    assert result["data"]["FirstName"] == "AssocTenant1"
+    assert result["data"]["FirstName"] == "James"
     numbers = {p["Number"] for p in result["data"]["PhoneNumbers"]}
     assert "555-101-2020" in numbers
 
@@ -233,7 +233,7 @@ def test_partial_vendor_phone_update(tools, run):
             )
         )
     )
-    assert result["data"]["CompanyName"] == "Vendor Co 2"
+    assert result["data"]["CompanyName"] == "BrightSpark Electric Co."
     numbers = {p["Number"] for p in result["data"]["PhoneNumbers"]}
     assert "6144445511" in numbers
 
@@ -247,7 +247,7 @@ def test_partial_rental_owner_phone_update(tools, run):
             )
         )
     )
-    assert result["data"]["FirstName"] == "Owner1"
+    assert result["data"]["FirstName"] == "Daniel"
     numbers = {p["Number"] for p in result["data"]["PhoneNumbers"]}
     assert "555-111-2222" in numbers
 
@@ -261,7 +261,7 @@ def test_partial_association_owner_phone_update(tools, run):
             )
         )
     )
-    assert result["data"]["FirstName"] == "AssocOwner1"
+    assert result["data"]["FirstName"] == "William"
     numbers = {p["Number"] for p in result["data"]["PhoneNumbers"]}
     assert "555-111-3333" in numbers
 
