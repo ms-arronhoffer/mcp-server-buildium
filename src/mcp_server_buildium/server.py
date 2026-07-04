@@ -161,12 +161,16 @@ def _build_cors_middleware() -> list:
     server does not emit CORS headers by default.
     """
     from starlette.middleware import Middleware
-    from starlette.middleware.base import BaseHTTPMiddleware
+    from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+    from starlette.requests import Request
+    from starlette.responses import Response
 
     class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
         """Add hardening headers to every HTTP response."""
 
-        async def dispatch(self, request, call_next):  # noqa: ANN001
+        async def dispatch(
+            self, request: Request, call_next: RequestResponseEndpoint
+        ) -> Response:
             response = await call_next(request)
             response.headers.setdefault("X-Content-Type-Options", "nosniff")
             response.headers.setdefault("X-Frame-Options", "DENY")

@@ -196,6 +196,8 @@ def _extract_docx_text(data: bytes) -> str | None:
             # uncompressed size exceeds our cap before decompressing them.
             if info.file_size > _MAX_DOCX_ENTRY_BYTES:
                 return None
+            # Read one byte past the cap so a truncated/lying header (declared
+            # size small but actual content large) is still detected as oversize.
             with zf.open(info) as fh:
                 raw = fh.read(_MAX_DOCX_ENTRY_BYTES + 1)
             if len(raw) > _MAX_DOCX_ENTRY_BYTES:
