@@ -20,6 +20,11 @@
 * 🧾 **Audit Trail** - Structured, redacted audit events with pluggable sinks and reporting
 * 🏢 **Multi-Property Types** - Rentals, associations, and units
 * 🔌 **MCP Protocol** - Compatible with Claude Desktop, Cursor, and other MCP clients
+* ✏️ **Safe Partial Updates** - Every `update_*` tool fetches the current record and merges only the changed fields, so single-field edits never accidentally overwrite the rest of the object
+* ♻️ **Auto-Retry with Backoff** - Transient Buildium API failures (429, 500–504) are retried automatically with jittered exponential backoff — no application-level error handling required
+* 📄 **Complete Portfolio Pagination** - Financial reports and alert scans walk every page of the underlying endpoints so figures reflect the whole portfolio, not a truncated first page
+* 🧩 **GET→POST/PUT Field Reshaping** - Lookup objects and phone-number lists returned by GET endpoints are automatically translated to the scalar/keyed form POST/PUT expects, so the assistant can reuse data it just fetched without manual reshaping
+* 💬 **Friendly Validation Errors** - When a `create_*` call fails schema validation, the error message names every missing or invalid field so the assistant can ask the user for exactly what's needed
 
 ## Requirements
 
@@ -300,6 +305,84 @@ extra dependencies are introduced. The raw file bytes never go to the model — 
 assistant passes structured content (columns/rows, sections, or slides) and the
 server assembles the file. Generated files are capped at 25 MB.
 
+### Reliability & Ergonomics
+
+Several design choices make this server unusually reliable and easy to use for
+both the assistant and operators.
+
+#### Partial / merge updates
+
+Every `update_*` tool automatically fetches the current record from Buildium
+before applying your changes. You only need to supply the fields you want to
+change; the server deep-merges them onto the current state and builds the full
+strict PUT schema internally. A single-field edit — "change the rent to $2 200" —
+works without resupplying the tenant list, address, or any other required field.
+There is no risk of accidentally overwriting an unrelated field with a blank value.
+
+#### Automatic retry with exponential backoff
+
+Every Buildium API call is wrapped with bounded retry logic. Transient errors
+(HTTP 429, 500, 502, 503, 504) are retried automatically with jittered
+exponential backoff, so brief API hiccups are invisible to the assistant.
+
+| Env var | Default | Effect |
+|---------|---------|--------|
+| `BUILDIUM_MAX_RETRIES` | `3` | Maximum retry attempts per call |
+| `BUILDIUM_BASE_BACKOFF_SECONDS` | `0.5` | Base delay for the first retry |
+| `BUILDIUM_MAX_BACKOFF_SECONDS` | `8.0` | Cap on the per-retry delay |
+
+The number of attempts taken is reported in every response envelope's `meta.attempts` field.
+
+#### Complete portfolio via auto-pagination
+
+Buildium list endpoints silently return only the first page when a caller
+doesn't paginate — which means an LLM query over a large portfolio may answer
+from a truncated view. The financial reporting tools (`rent_roll_report`,
+`aged_receivables_report`, `income_statement_report`) and the
+`portfolio_alerts` tool automatically walk **every page** of the underlying
+endpoint so their figures always reflect the whole portfolio. The ceiling is
+configurable:
+
+```bash
+BUILDIUM_MAX_FETCH_ALL_RECORDS=5000   # default; raise for very large portfolios
+```
+
+#### Friendly validation errors
+
+When a `create_*` call fails because a required field was not provided, the
+error envelope lists every missing field by its JSON name plus an actionable
+hint. The assistant can then ask the user for exactly the missing information
+rather than surfacing a raw schema-validation exception.
+
+The `describe_create_schema` tool extends this by returning the full
+required/optional field checklist for any creatable Buildium object before a
+creation attempt — useful when the assistant is populating fields from an
+uploaded document.
+
+#### GET → POST/PUT field reshaping
+
+Buildium's GET endpoints expose foreign keys as nested lookup objects
+(`{"Id": 1, "Name": "Plumbing"}`) and phone numbers as a list
+(`[{"Number": "555-1234", "Type": "Home"}]`), but the POST/PUT messages want a
+bare scalar (`"CategoryId": 1`) and a keyed object
+(`"PhoneNumbers": {"Home": "555-1234"}`). The server translates automatically,
+so the assistant can reuse the data it just fetched from a GET response without
+manually reshaping it before an update.
+
+#### Built-in diagnostic tools
+
+Two built-in tools are always registered, regardless of the active category set:
+
+* **`health_check`** — Returns the server version, uptime, active transport,
+  enabled tool categories, and the effective security policy (roles, guardrails,
+  rate-limit settings) without requiring a Buildium API call. Useful for
+  verifying configuration and inspecting which tools are currently allowed.
+
+* **`audit_summary`** *(admin-only)* — Returns live audit aggregates over MCP:
+  total call counts broken down by tool and outcome, overall error rate, a list
+  of recent mutations, and recent denied or rate-limited attempts. Requires the
+  `file` audit sink (`BUILDIUM_AUDIT_SINK=file`).
+
 ### Dev auth bypass (local/mock testing)
 
 To run the HTTP transport locally against the mock API **without** an Entra
@@ -356,7 +439,16 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 ## Available Tools (160 category tools)
 
 > In addition to the 160 category tools below, the server exposes two built-in
-> tools: `health_check` and `audit_summary` (admin-only), for a total of 162.
+> tools that are always registered regardless of the active category set:
+>
+> * **`health_check`** — Returns the server version, uptime, active transport,
+>   enabled tool categories, and the effective security policy. Does not call
+>   Buildium; useful for verifying configuration.
+> * **`audit_summary`** *(admin-only)* — Returns live audit aggregates (call
+>   counts by tool and outcome, error rate, recent mutations, recent denials)
+>   over MCP. Requires `BUILDIUM_AUDIT_SINK=file`.
+>
+> Total: 160 category tools + 2 built-in = **162 tools**.
 
 ### Associations (6 tools)
 * `list_associations` - List all associations
@@ -384,7 +476,7 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 * `get_lease_refund` - Get a lease refund by ID
 * `list_lease_recurring_transactions` - List recurring transactions on a lease
 * `list_lease_outstanding_balances` - List outstanding balances across leases
-* `lease_receivables_summary` - Summarized, LLM-friendly outstanding-receivables report (auto-paginated)
+* `lease_receivables_summary` - Auto-paginated, LLM-friendly outstanding-receivables summary: walks every page of active lease balances and returns a pre-aggregated view with per-lease and portfolio totals *(sensitive)*
 
 ### Rentals (5 tools)
 * `list_rentals` - List rental properties
