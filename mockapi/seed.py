@@ -319,6 +319,46 @@ def _seed_lease_tenants(session: Session, leases: list[dict]) -> None:
         )
 
 
+def _seed_lease_outstanding_balances(session: Session, leases: list[dict]) -> None:
+    """Seed outstanding balances for active leases that carry unpaid rent.
+
+    Mirrors Buildium's ``GET /v1/leases/outstandingbalances`` endpoint, which the
+    proactive ``portfolio_alerts`` late-rent rule reads. Only a subset of active
+    leases carry a balance so the alert digest has realistic, non-trivial data.
+    """
+    for lease in leases:
+        if lease.get("LeaseStatus") != "Active":
+            continue
+        lease_id = lease["Id"]
+        # Give roughly every third active lease an outstanding balance.
+        if lease_id % 3 != 0:
+            continue
+        current = round(600.0 + lease_id * 20, 2)
+        overdue = round(400.0 + lease_id * 10, 2) if lease_id % 2 == 0 else 0.0
+        total = round(current + overdue, 2)
+        doc = {
+            "Id": lease_id,
+            "LeaseId": lease_id,
+            "PropertyId": lease["PropertyId"],
+            "UnitId": lease["UnitId"],
+            "Balance0To30Days": current,
+            "Balance31To60Days": overdue,
+            "Balance61To90Days": 0.0,
+            "BalanceOver90Days": 0.0,
+            "TotalBalance": total,
+            "IsNoticeGiven": False,
+        }
+        create_doc(
+            session,
+            "lease_outstanding_balances",
+            doc,
+            entity_id=lease_id,
+            property_id=lease["PropertyId"],
+            unit_id=lease["UnitId"],
+            status=lease["LeaseStatus"],
+        )
+
+
 # Community-style names for homeowners associations.
 _HOA_NAMES: list[str] = [
     "Willow Creek Homeowners Association",
@@ -815,6 +855,7 @@ def seed_all(session: Session) -> dict[str, int]:
     _seed_unit_listings(session, units)
     leases = _seed_leases(session, units)
     _seed_lease_tenants(session, leases)
+    _seed_lease_outstanding_balances(session, leases)
     _seed_associations(session)
     _seed_rental_owners(session)
     _seed_applicants(session)

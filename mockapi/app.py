@@ -228,6 +228,25 @@ def create_app() -> FastAPI:
         body = _normalize_phone_numbers(body)
         return _require(store.update_doc(db, "lease_tenants", tenant_id, body), "Tenant")
 
+    # Static /leases/outstandingbalances must precede the dynamic /leases/{lease_id}.
+    @app.get("/v1/leases/outstandingbalances")
+    async def list_lease_outstanding_balances(
+        request: Request, db: Session = Depends(get_session)
+    ):
+        limit, offset = _page(request)
+        lease_ids = _int_list(request, "leaseids")
+        balances = store.list_docs(
+            db,
+            "lease_outstanding_balances",
+            limit=limit,
+            offset=offset,
+            property_ids=_int_list(request, "propertyids"),
+            statuses=_str_list(request, "leasestatuses"),
+        )
+        if lease_ids:
+            balances = [b for b in balances if b.get("LeaseId") in lease_ids]
+        return balances
+
     @app.get("/v1/leases/{lease_id}")
     async def get_lease(lease_id: int, db: Session = Depends(get_session)):
         return _require(store.get_doc(db, "leases", lease_id), "Lease")

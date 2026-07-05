@@ -73,6 +73,36 @@ describe("parseInline", () => {
     ]);
   });
 
+  it("parses an action link whose label contains parentheses", () => {
+    // The assistant emits task rows like `[Service disposal (Due: 2026-01-20)]
+    // (action:Show full details for task 5)`; parentheses in the visible label
+    // must not break the `[label](target)` grammar.
+    const tokens = parseInline(
+      "**[Service garbage disposal (Due: 2026-01-20)](action:Show full details for task 5)**",
+    );
+    expect(tokens).toEqual([
+      {
+        type: "bold",
+        children: [
+          {
+            type: "action",
+            label: "Service garbage disposal (Due: 2026-01-20)",
+            prompt: "Show full details for task 5",
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("keeps parentheses inside an action prompt instead of truncating", () => {
+    // A natural-language action prompt may itself contain parentheses; the whole
+    // prompt must be captured rather than cut off at the first `)`.
+    const tokens = parseInline("[Lease 1](action:Show details for lease 1 (Unit 101))");
+    expect(tokens).toEqual([
+      { type: "action", label: "Lease 1", prompt: "Show details for lease 1 (Unit 101)" },
+    ]);
+  });
+
   it("keeps unsafe link schemes as inert text", () => {
     // A javascript: URL must never become a clickable anchor/action.
     const tokens = parseInline("[x](javascript:alert(1))");
