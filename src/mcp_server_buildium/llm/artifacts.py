@@ -592,6 +592,10 @@ _PPTX_MARGIN = 640080  # ~0.7in left/right content margin
 _PPTX_STRIPE = 137160  # ~0.15in brand stripe width
 _PPTX_CONTENT_W = _PPTX_W - 2 * _PPTX_MARGIN
 
+# Cap categories/series on an auto-derived chart so a large table stays legible.
+_MAX_DERIVED_CHART_CATEGORIES = 12
+_MAX_DERIVED_CHART_SERIES = 4
+
 
 def _pptx_run(text: str, *, size: int, bold: bool, color: str) -> str:
     """Return a formatted DrawingML text run (``size`` in points)."""
@@ -762,10 +766,10 @@ def _chart_from_table(columns: list[str], rows: list[list[object]]) -> Chart | N
     if not series:
         return None
     # Keep the deck readable: cap categories/series for a derived chart.
-    if len(categories) > 12:
-        categories = categories[:12]
-        series = [(name, vals[:12]) for name, vals in series]
-    return Chart(categories=categories, series=series[:4], kind="column")
+    if len(categories) > _MAX_DERIVED_CHART_CATEGORIES:
+        categories = categories[:_MAX_DERIVED_CHART_CATEGORIES]
+        series = [(name, vals[:_MAX_DERIVED_CHART_CATEGORIES]) for name, vals in series]
+    return Chart(categories=categories, series=series[:_MAX_DERIVED_CHART_SERIES], kind="column")
 
 
 def _num_cache(values: list[float]) -> str:
