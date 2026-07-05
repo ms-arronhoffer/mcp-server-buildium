@@ -38,6 +38,7 @@ Four configurable tiers map to the router's internal task-type classifications:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -344,10 +345,23 @@ class LLMConfigStore:
     def _save_sync(self, config: LLMConfig) -> None:
         raw = _serialise(config, self._fernet)
         tmp = self._path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump(raw, fh, indent=2)
-            fh.write("\n")
-        os.replace(tmp, self._path)
+        try:
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(raw, fh, indent=2)
+                fh.write("\n")
+            os.replace(tmp, self._path)
+        except OSError as exc:
+            # A non-writable path (e.g. the default relative "llm_config.json"
+            # in a read-only container working directory) surfaces here as a
+            # bare errno. Re-raise with an actionable message so the admin UI
+            # can tell the operator exactly how to fix it.
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)
+            raise RuntimeError(
+                f"Could not write the LLM config file at '{self._path}': {exc.strerror or exc}. "
+                "Set BUILDIUM_LLM_CONFIG_PATH to a writable file path (e.g. on a "
+                "mounted, writable volume) and ensure the server process can write to it."
+            ) from exc
         # Bust the cache so the next load re-reads.
         self._cache = None
         logger.info("LLM config store saved to %s", self._path)
