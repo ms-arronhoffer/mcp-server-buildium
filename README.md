@@ -11,12 +11,16 @@
 ## Features
 
 * 🔐 **API Key Authentication** - Secure server-to-server authentication via headers
-* 🏘️ **185 Tools Across 24 Categories** - Comprehensive property management coverage
+* 🏘️ **184 Tools Across 25 Categories** - Comprehensive property management coverage
 * 💸 **Month-End Close Automation** - Post rent, apply payments oldest-first, assess late fees, and produce owner statements in one instruction (dry-run by default)
 * 🔔 **Proactive Alerts & Digest** - A rules layer for scheduled, push-style intelligence (lease expirations, late rent, low reserves, aging work orders)
 * 📊 **Trustworthy Financial Reports** - Deterministic, reconciled rent roll, aged receivables, and P&L with branded PDF/XLSX/CSV export
+* 📈 **Deep Analytics & Intelligence** - Budget variance, vacancy, rent-trend, vendor-spend, cash-flow projection, plus revenue-leakage and explainable-anomaly signals
+* 🤖 **Server-side LLM Assistant** - `/chat` runs the tool-calling loop in-process (OpenAI, Anthropic, or Gemini) so provider keys never reach the browser
+* 🖥️ **Admin Web UI** - `/manage/` configures LLM models/keys and manages users & roles via Microsoft Graph (encrypted config store)
+* ✉️ **Transactional Email** - Optional `send_email*` tools dispatch mail through AWS SES
 * 📋 **Selective Tool Loading** - Enable only the categories you need
-* 🛡️ **Roles & Guardrails** - Read-only mode, RBAC roles, allow/deny lists, rate limiting
+* 🛡️ **Roles & Guardrails** - Read-only mode, RBAC roles, allow/deny lists, rate limiting, per-user Entra App Role scoping
 * 🧾 **Audit Trail** - Structured, redacted audit events with pluggable sinks and reporting
 * 🏢 **Multi-Property Types** - Rentals, associations, and units
 * 🔌 **MCP Protocol** - Compatible with Claude Desktop, Cursor, and other MCP clients
@@ -98,10 +102,11 @@ Control which tool categories are enabled using the `BUILDIUM_CATEGORIES` enviro
 | `alerts` | 1 | Proactive portfolio intelligence — scheduled alerts & daily digest (lease expirations, late rent, low bank reserve, aging work orders) |
 | `analytics` | 8 | Deep-analysis & opportunity surfacing (budget variance, vacancy analysis, rent trend, vendor spend, cash flow projection, maintenance ROI, owner distribution, delinquency trend) |
 | `intelligence` | 17 | Net-new high-value intelligence: revenue leakage, turnover/renewal risk, owner risk, role digests, and explainable anomaly detection signals |
+| `email` | 3 | Transactional email via AWS SES (`send_email` / `send_email_to_tenant` / `send_email_to_owner`); only active when `BUILDIUM_AWS_SES_SENDER` is set |
 
-**Total: 185 category tools + built-in `health_check` and `audit_summary` tools (187 total).**
+**Total: 184 category tools + built-in `health_check` and `audit_summary` tools (186 total).** The `email` category is only registered when AWS SES is configured, so a default deployment exposes 181 category tools until you set `BUILDIUM_AWS_SES_SENDER`.
 
-If `BUILDIUM_CATEGORIES` is not set, all 185 tools across all 24 categories are enabled.
+If `BUILDIUM_CATEGORIES` is not set, all categories are enabled (the `email` category still requires AWS SES to be configured).
 
 ### Security, Roles & Audit
 
@@ -250,20 +255,39 @@ tool-calling loop and the provider call both run in-process on the server.
 
 Three providers are supported via a server-side adapter layer:
 
-| Provider | Wire API | Key env var |
+| Provider | Wire API | Key env var (legacy) |
 | --- | --- | --- |
 | OpenAI | Chat Completions | `BUILDIUM_LLM_OPENAI_API_KEY` |
 | Anthropic | Messages API | `BUILDIUM_LLM_ANTHROPIC_API_KEY` |
 | Google Gemini | `generateContent` | `BUILDIUM_LLM_GEMINI_API_KEY` |
 
-Select the active provider and default model, and (optionally) an allow-list of
-models a client may request:
+**Recommended: configure the assistant from the admin web UI.** When
+`BUILDIUM_MANAGEMENT_ENABLED=true`, an admin can open `https://<your-server>/manage/`
+to pick providers, models, and per-tier assignments and to paste provider API
+keys through a web form. The config is persisted to an on-disk **config store**
+(`BUILDIUM_LLM_CONFIG_PATH`, default `llm_config.json`); set
+`BUILDIUM_LLM_STORE_KEY` (a Fernet key) to encrypt the stored API keys at rest —
+without it, keys are stored in plaintext with a startup warning. A multi-provider
+**router** can route each turn to a different model tier (classifier strategy).
+
+```bash
+BUILDIUM_LLM_CONFIG_PATH=llm_config.json         # where the admin-UI config is saved
+BUILDIUM_LLM_STORE_KEY=<base64-fernet-key>       # encrypts stored API keys at rest
+```
+
+The `BUILDIUM_LLM_*` environment variables below are **deprecated** but still
+honoured for a one-time migration: if the config store file does not yet exist,
+the server seeds it from these values on first use (a `DeprecationWarning` is
+logged). Prefer the admin UI going forward.
 
 ```bash
 BUILDIUM_LLM_PROVIDER=openai            # openai | anthropic | gemini
 BUILDIUM_LLM_MODEL=gpt-4o-mini          # required when a provider is set
 BUILDIUM_LLM_ALLOWED_MODELS=gpt-4o-mini,gpt-4o   # optional; default must be a member
 BUILDIUM_LLM_OPENAI_API_KEY=sk-...      # matches the selected provider
+# Optional multi-provider router (deprecated env form; prefer the admin UI):
+BUILDIUM_LLM_ROUTER_ENABLED=true
+BUILDIUM_LLM_ROUTER_PROVIDERS='[{"provider":"anthropic","model":"claude-opus-4-5"},{"provider":"openai","model":"gpt-4o"}]'
 ```
 
 `/chat` is protected by the **same Entra JWT auth as `/mcp`**, so only signed-in
@@ -470,9 +494,9 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 }
 ```
 
-## Available Tools (185 category tools)
+## Available Tools (184 category tools)
 
-> In addition to the 185 category tools below, the server exposes two built-in
+> In addition to the 184 category tools below, the server exposes two built-in
 > tools that are always registered regardless of the active category set:
 >
 > * **`health_check`** — Returns the server version, uptime, active transport,
@@ -482,7 +506,8 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 >   counts by tool and outcome, error rate, recent mutations, recent denials)
 >   over MCP. Requires `BUILDIUM_AUDIT_SINK=file`.
 >
-> Total: 185 category tools + 2 built-in = **187 tools**.
+> Total: 184 category tools + 2 built-in = **186 tools**. The 3 `email` tools are
+> only registered when AWS SES is configured (`BUILDIUM_AWS_SES_SENDER`).
 
 ### Associations (6 tools)
 * `list_associations` - List all associations
@@ -679,6 +704,31 @@ Net-new portfolio intelligence focused on outcomes (delinquency reduction, cash-
 * Operations efficiency surfacing: `work_order_sla_bottleneck_report`, `vendor_concentration_variance_report`
 * Proactive notifications: `morning_portfolio_digest`, `end_of_day_exception_digest`, `role_notification_feed`
 * Explainable anomalies (standardized score/confidence/baseline/delta/why/recommendation/source records): `rent_payment_behavior_shift_anomaly`, `delinquency_cluster_anomaly`, `expense_anomaly_detection`, `work_order_cycle_time_anomaly`, `vacancy_duration_anomaly`, `data_quality_anomaly_scan`
+
+### Analytics (8 tools)
+
+Deep-analysis tools that surface opportunities and risks by fanning out across the
+underlying endpoints and computing every figure in code (all *sensitive* reads;
+several support optional `csv`/`xlsx`/`pdf` export):
+
+* `budget_variance_report` - Compare budgeted amounts to GL actuals and flag accounts over a threshold
+* `vacancy_analysis` - Find vacant units and estimate the revenue gap from lost rent
+* `rent_trend_report` - Find leases expiring soon that are priced below the property rent average
+* `vendor_spend_report` - Analyse vendor spend concentration and surface top spenders
+* `cash_flow_projection` - Project 30/60/90-day cash flow from scheduled rents and outstanding bills
+* `maintenance_roi_report` - Rank units by maintenance cost vs. rent collected to surface the money pits
+* `owner_distribution_report` - Per-owner net distributable amount with an exportable owner statement
+* `delinquency_trend` - Score delinquent leases by severity and surface improving/worsening trends
+
+### Email (3 tools)
+
+Transactional email dispatch via **AWS SES**. This category is only registered
+when `BUILDIUM_AWS_SES_SENDER` is set to a verified SES sender address (see the
+AWS SES section of `.env.example`); all three are *sensitive writes*.
+
+* `send_email` - Send an email to an explicit recipient via AWS SES
+* `send_email_to_tenant` - Look up a rental tenant by ID and email them via AWS SES
+* `send_email_to_owner` - Look up a rental owner by ID and email them via AWS SES
 
 ## Tool Request/Response Examples
 
@@ -1110,8 +1160,28 @@ mcp-server-buildium/
 
 ## API Endpoints
 
+Upstream Buildium API base URLs:
+
 * **Production**: `https://api.buildium.com/`
 * **Sandbox**: `https://apisandbox.buildium.com/`
+
+When run with the HTTP transport (`BUILDIUM_TRANSPORT=http`), this server exposes
+its own routes next to the MCP endpoint:
+
+| Route | Purpose |
+| --- | --- |
+| `POST /mcp` | Streamable HTTP MCP endpoint (tools/list, tools/call) |
+| `POST /chat` | Server-side LLM assistant, streamed over SSE (Entra-authenticated) |
+| `GET /capabilities` | Non-secret assistant metadata (enabled flag, provider, model list) |
+| `GET /manage/` | Admin web UI (LLM config + user/role management) |
+| `GET /manage/capabilities` | Whether management is enabled and the caller is an admin |
+| `GET,POST /manage/users`, `PATCH /manage/users/{id}/role` | Invite/list users and change roles via Microsoft Graph |
+| `GET /manage/extension?browser=chrome\|firefox` | Download the prebuilt, preconfigured extension archive |
+| `GET,PUT /manage/llm`, `PATCH /manage/llm/tier/{tier}`, `POST /manage/llm/test` | Read/replace LLM config, update a tier, or test a provider key |
+
+The `/manage/*` routes are inert (HTTP 503) unless `BUILDIUM_MANAGEMENT_ENABLED=true`,
+and every mutating route additionally requires the caller to resolve to the coarse
+`admin` role.
 
 ## Security Best Practices
 
@@ -1127,7 +1197,7 @@ mcp-server-buildium/
 * **Language**: Python 3.11+
 * **Framework**: FastMCP
 * **Auth**: API key headers (`x-buildium-client-id` / `x-buildium-client-secret`)
-* **Transport**: stdio (MCP protocol)
+* **Transport**: stdio (default) or Streamable HTTP (`BUILDIUM_TRANSPORT=http`) with Microsoft Entra ID JWT auth
 * **HTTP Client**: httpx
 * **Testing**: pytest with mocks
 
