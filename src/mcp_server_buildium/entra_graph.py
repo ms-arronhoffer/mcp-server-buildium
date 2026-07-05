@@ -36,7 +36,7 @@ logger = get_logger("mcp_server_buildium.graph")
 _DEFAULT_INVITE_REDIRECT_URL = "https://myapps.microsoft.com"
 
 # Refresh app-only tokens this many seconds before their stated expiry.
-_TOKEN_SKEW_SECONDS = 60
+_TOKEN_REFRESH_MARGIN_SECONDS = 60
 
 
 class GraphError(Exception):
@@ -99,7 +99,7 @@ class GraphClient:
             )
         self._token = str(data["access_token"])
         expires_in = int(data.get("expires_in") or 3600)
-        self._token_expires_at = now + max(0, expires_in - _TOKEN_SKEW_SECONDS)
+        self._token_expires_at = now + max(0, expires_in - _TOKEN_REFRESH_MARGIN_SECONDS)
         return self._token
 
     async def _request(

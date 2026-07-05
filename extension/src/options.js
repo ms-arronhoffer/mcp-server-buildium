@@ -7,6 +7,10 @@ import { ManagementClient } from "./management.js";
 
 const api = getApi();
 
+// Revoke the temporary object URL after the browser has had time to start the
+// download. A few seconds is ample; 10s is a conservative safety margin.
+const BLOB_URL_REVOKE_DELAY_MS = 10_000;
+
 const FIELD_CONFIG = [
   { key: "mcpServerUrl", type: "text" },
   { key: "entraTenantId", type: "text" },
@@ -192,7 +196,7 @@ async function saveBlob(blob, filename) {
       link.click();
     }
   } finally {
-    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    setTimeout(() => URL.revokeObjectURL(url), BLOB_URL_REVOKE_DELAY_MS);
   }
 }
 

@@ -45,8 +45,11 @@ MANAGE_USERS_PATH = "/manage/users"
 MANAGE_USER_ROLE_PATH = "/manage/users/{user_id}/role"
 MANAGE_EXTENSION_PATH = "/manage/extension"
 
-# Basic email sanity check for B2B invitations (defense in depth; Entra also
-# validates). Intentionally permissive.
+# Basic email sanity check for B2B invitations (defense in depth). Intentionally
+# permissive: it only rejects obviously malformed input (missing @/domain) and
+# does not attempt full RFC 5322 validation or catch edge cases like consecutive
+# or leading/trailing dots. Microsoft Entra performs the authoritative
+# validation when the invitation is created.
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 # Content types and download filenames per browser for the prebuilt archives.
