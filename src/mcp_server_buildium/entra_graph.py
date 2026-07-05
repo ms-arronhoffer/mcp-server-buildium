@@ -119,9 +119,7 @@ class GraphClient:
                 },
             )
         except Exception as exc:  # pragma: no cover - transport failure
-            raise GraphError(
-                "Could not reach Microsoft Graph", code="graph_unreachable"
-            ) from exc
+            raise GraphError("Could not reach Microsoft Graph", code="graph_unreachable") from exc
         if resp.status_code == 204 or not resp.content:
             return None
         data = _safe_json(resp)
@@ -154,10 +152,7 @@ class GraphClient:
         Returns a dict with at least ``id`` (the invited user's object ID) and
         ``email``.
         """
-        redirect = (
-            self._config.management_invite_redirect_url
-            or _DEFAULT_INVITE_REDIRECT_URL
-        )
+        redirect = self._config.management_invite_redirect_url or _DEFAULT_INVITE_REDIRECT_URL
         payload = {
             "invitedUserEmailAddress": email,
             "inviteRedirectUrl": redirect,
@@ -167,9 +162,7 @@ class GraphClient:
         invited = (data or {}).get("invitedUser") or {}
         user_id = invited.get("id")
         if not user_id:
-            raise GraphError(
-                "Graph did not return an invited user ID", code="invite_failed"
-            )
+            raise GraphError("Graph did not return an invited user ID", code="invite_failed")
         return {
             "id": str(user_id),
             "email": email,
@@ -200,9 +193,7 @@ class GraphClient:
     async def list_app_role_assignments(self) -> list[dict[str, Any]]:
         """List raw app-role assignments on the API service principal."""
         sp_id = self._config.entra_api_service_principal_id
-        data = await self._request(
-            "GET", f"/servicePrincipals/{sp_id}/appRoleAssignedTo"
-        )
+        data = await self._request("GET", f"/servicePrincipals/{sp_id}/appRoleAssignedTo")
         value = (data or {}).get("value") if isinstance(data, dict) else None
         return list(value or [])
 
