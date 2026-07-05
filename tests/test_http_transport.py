@@ -96,3 +96,29 @@ def test_initialize_and_health_check_over_http(client) -> None:
     assert structured["data"]["status"] == "ok"
     assert structured["data"]["transport"] == "stdio"  # default in test env
     assert structured["data"]["auth_mode"] == "none"
+
+
+# --- HTTP startup diagnostics ---------------------------------------------
+def test_startup_warns_on_loopback_host(monkeypatch, caplog):
+    """Binding to a loopback host logs a LAN-unreachable warning."""
+    monkeypatch.setattr(server.config, "host", "127.0.0.1")
+    with caplog.at_level("WARNING", logger="mcp_server_buildium.server"):
+        server._log_http_startup_diagnostics()
+    assert any("ERR_CONNECTION_REFUSED" in r.message for r in caplog.records)
+
+
+def test_startup_no_loopback_warning_for_all_interfaces(monkeypatch, caplog):
+    """Binding to 0.0.0.0 does not emit the loopback warning."""
+    monkeypatch.setattr(server.config, "host", "0.0.0.0")
+    with caplog.at_level("WARNING", logger="mcp_server_buildium.server"):
+        server._log_http_startup_diagnostics()
+    assert not any("ERR_CONNECTION_REFUSED" in r.message for r in caplog.records)
+
+
+def test_startup_notes_management_disabled(monkeypatch, caplog):
+    """When management is off, a note explains the 503 / hidden admin panel."""
+    monkeypatch.setattr(server.config, "host", "0.0.0.0")
+    monkeypatch.setattr(server.config, "management_enabled", False)
+    with caplog.at_level("INFO", logger="mcp_server_buildium.server"):
+        server._log_http_startup_diagnostics()
+    assert any("BUILDIUM_MANAGEMENT_ENABLED" in r.message for r in caplog.records)

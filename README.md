@@ -224,6 +224,22 @@ without editing the compose file. When no `.env` is present the services fall ba
 to the seeded mock API defaults. `BUILDIUM_HOST` is always forced to `0.0.0.0`
 inside the container regardless of any value in `.env`.
 
+**Reaching the server from another device (LAN / the extension):** the HTTP
+transport binds to `BUILDIUM_HOST`, which defaults to `127.0.0.1` (loopback). A
+loopback bind only accepts connections from the same machine, so a browser or the
+extension on another device gets `ERR_CONNECTION_REFUSED`. Set
+`BUILDIUM_HOST=0.0.0.0` (all interfaces) or a specific LAN IP, make sure
+`BUILDIUM_TRANSPORT=http`, and confirm no host firewall blocks the port. When the
+server starts on a loopback host it logs a warning explaining this.
+
+**Admin management page (`/manage`) and the extension admin panel** are **off by
+default**: `GET /manage` returns HTTP 503 and the extension's admin panel stays
+hidden until you set `BUILDIUM_MANAGEMENT_ENABLED=true` (plus the Microsoft Graph
+and `BUILDIUM_ENTRA_ROLE_POLICY_MAP` settings that gate it). The panel is
+data-driven from `GET /manage/capabilities`, so **no extension rebuild is
+needed** — it appears automatically once the server reports management enabled and
+the caller resolves to the `admin` role.
+
 ### Server-side LLM assistant (`/chat`)
 
 The HTTP transport also exposes a **server-side assistant** so provider API keys
