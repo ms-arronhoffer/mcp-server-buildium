@@ -241,6 +241,14 @@ def _log_http_startup_diagnostics() -> None:
         )
     if config.management_active():
         logger.info("Admin management routes active (GET /manage/ serves the admin UI).")
+        if not config.graph_management_configured():
+            missing = config._missing_graph_management_settings()
+            logger.warning(
+                "User-management routes (invite/list/change role) are unavailable: "
+                "missing %s. The admin UI and LLM-config routes still work; set these "
+                "to enable user management.",
+                ", ".join(missing),
+            )
     else:
         logger.info(
             "Admin management routes are disabled: GET /manage returns HTTP 503 and "
