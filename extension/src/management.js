@@ -124,4 +124,53 @@ export class ManagementClient {
     }
     return resp.blob();
   }
+
+  // ---------------------------------------------------------------------------
+  // LLM configuration
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Return the current LLM configuration with API keys masked.
+   * @returns {Promise<object>}  shape: { providers, tiers, encrypted, version }
+   */
+  async getLlmConfig() {
+    return this._request("GET", "llm");
+  }
+
+  /**
+   * Replace the full LLM configuration (providers + tiers).
+   * Pass masked key strings to preserve existing stored keys.
+   * @param {object} cfg  shape: { providers: {...}, tiers: {...} }
+   * @returns {Promise<object>}  updated config with masked keys
+   */
+  async setLlmConfig(cfg) {
+    return this._request("PUT", "llm", cfg);
+  }
+
+  /**
+   * Update a single model-tier assignment.
+   * @param {string} tier      one of 'simple'|'thinking'|'agentic'|'artifact'
+   * @param {string} provider  one of 'openai'|'anthropic'|'gemini'
+   * @param {string} model     model name (e.g. 'gpt-4o-mini')
+   * @returns {Promise<object>}  updated config with masked keys
+   */
+  async setLlmTier(tier, provider, model) {
+    const suffix = `llm/tier/${encodeURIComponent(tier)}`;
+    return this._request("PATCH", suffix, { provider, model });
+  }
+
+  /**
+   * Validate a provider API key with a live request.
+   * @param {string} provider  one of 'openai'|'anthropic'|'gemini'
+   * @param {string} [apiKey]  key to test (uses stored key when omitted)
+   * @param {string} [baseUrl] optional base-URL override
+   * @returns {Promise<{ok: boolean, message: string}>}
+   */
+  async testLlmProvider(provider, apiKey = "", baseUrl = "") {
+    return this._request("POST", "llm/test", {
+      provider,
+      api_key: apiKey,
+      base_url: baseUrl,
+    });
+  }
 }

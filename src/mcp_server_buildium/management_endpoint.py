@@ -2,8 +2,9 @@
 
 These custom routes let an **admin** (as determined by the existing Entra JWT
 auth and the coarse ``admin`` role that governs :data:`ADMIN_ONLY_TOOLS`) manage
-users and distribute the browser extension:
+users, distribute the browser extension, and configure LLM providers/models:
 
+* ``GET  /manage/`` — serve the self-contained admin web UI (HTML page).
 * ``GET  /manage/capabilities`` — whether management is enabled and whether the
   caller is an admin (so the extension can show/hide the admin UI).
 * ``GET  /manage/users`` — list users assigned to the API app and their roles.
@@ -11,6 +12,10 @@ users and distribute the browser extension:
 * ``PATCH /manage/users/{id}/role`` — change a user's assigned role.
 * ``GET  /manage/extension?browser=chrome|firefox`` — download the prebuilt,
   preconfigured extension archive.
+* ``GET  /manage/llm`` — return the current LLM config with keys masked.
+* ``PUT  /manage/llm`` — replace the full LLM config (providers + tiers).
+* ``PATCH /manage/llm/tier/{tier}`` — update a single model-tier assignment.
+* ``POST /manage/llm/test`` — validate a provider API key with a live request.
 
 Every mutating/download route authenticates with the same verifier as ``/mcp``
 and ``/chat`` (401 on failure) and then requires the caller to be an admin (403
@@ -24,10 +29,11 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from starlette.requests import Request
-from starlette.responses import FileResponse, JSONResponse
+from starlette.responses import FileResponse, HTMLResponse, JSONResponse
 
 from .config import ENTRA_MAPPABLE_ROLES, MANAGEMENT_BROWSERS
 from .entra_graph import GraphClient, GraphError
+from .llm.config_store import PROVIDERS, TIERS, LLMConfig, get_store
 from .logging_config import get_logger
 from .security.policy import is_admin_claims
 
@@ -40,10 +46,14 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 logger = get_logger("mcp_server_buildium.manage")
 
+MANAGE_ADMIN_UI_PATH = "/manage"
 MANAGE_CAPABILITIES_PATH = "/manage/capabilities"
 MANAGE_USERS_PATH = "/manage/users"
 MANAGE_USER_ROLE_PATH = "/manage/users/{user_id}/role"
 MANAGE_EXTENSION_PATH = "/manage/extension"
+MANAGE_LLM_PATH = "/manage/llm"
+MANAGE_LLM_TIER_PATH = "/manage/llm/tier/{tier}"
+MANAGE_LLM_TEST_PATH = "/manage/llm/test"
 
 # Basic email sanity check for B2B invitations (defense in depth). Intentionally
 # permissive: it only rejects obviously malformed input (missing @/domain) and
@@ -143,6 +153,28 @@ def register_management_routes(
             status = 400
         return JSONResponse({"error": exc.message, "code": exc.code}, status_code=status)
 
+    # -----------------------------------------------------------------------
+    # Admin UI (HTML page)
+    # -----------------------------------------------------------------------
+
+    @mcp.custom_route(MANAGE_ADMIN_UI_PATH, methods=["GET"])
+    async def manage_admin_ui(request: Request) -> HTMLResponse:
+        """Serve the self-contained LLM configuration admin page.
+
+        The page itself requires no auth token to *load* (it is just HTML with
+        no sensitive data). All subsequent API calls it makes use the admin's
+        ****** which they enter in the UI. Management must be enabled.
+        """
+        if not config.management_active():
+            return HTMLResponse(
+                "<html><body><h1>503 Management Not Enabled</h1>"
+                "<p>Set BUILDIUM_MANAGEMENT_ENABLED=true to use this UI.</p></body></html>",
+                status_code=503,
+            )
+        from .llm.admin_page import get_admin_html
+
+        return HTMLResponse(get_admin_html())
+
     @mcp.custom_route(MANAGE_CAPABILITIES_PATH, methods=["GET"])
     async def manage_capabilities(request: Request) -> JSONResponse:
         # Authenticate but do not hard-require admin: the extension calls this to
@@ -155,12 +187,18 @@ def register_management_routes(
         available = sorted(
             b for b in MANAGEMENT_BROWSERS if config.get_management_extension_path(b)
         )
+        store = get_store(config)
+        llm_configured = False
+        if store is not None:
+            llm_cfg = store.load()
+            llm_configured = llm_cfg is not None and llm_cfg.is_configured()
         return JSONResponse(
             {
                 "enabled": enabled,
                 "isAdmin": is_admin,
                 "roles": sorted(ENTRA_MAPPABLE_ROLES),
                 "extensionBrowsers": available,
+                "llmConfigured": llm_configured,
             }
         )
 
@@ -291,3 +329,181 @@ def register_management_routes(
             filename=filename,
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
+
+    # -----------------------------------------------------------------------
+    # LLM configuration routes
+    # -----------------------------------------------------------------------
+
+    def _get_llm_store():
+        store = get_store(config)
+        if store is None:
+            raise ValueError(
+                "The LLM config store is not configured. "
+                "Set BUILDIUM_LLM_CONFIG_PATH to a writable file path."
+            )
+        return store
+
+    @mcp.custom_route(MANAGE_LLM_PATH, methods=["GET"])
+    async def manage_llm_get(request: Request) -> JSONResponse:
+        """Return the current LLM config with API keys masked."""
+        claims, error = await _require_admin(request)
+        if error is not None:
+            return error
+        try:
+            store = _get_llm_store()
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=503)
+        llm_cfg = store.load() or LLMConfig()
+        _audit("manage_llm_get", "read", "success")
+        return JSONResponse(store.to_display(llm_cfg))
+
+    @mcp.custom_route(MANAGE_LLM_PATH, methods=["PUT"])
+    async def manage_llm_put(request: Request) -> JSONResponse:
+        """Replace the full LLM config (providers + tiers)."""
+        claims, error = await _require_admin(request)
+        if error is not None:
+            return error
+        try:
+            store = _get_llm_store()
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=503)
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "Invalid JSON body."}, status_code=400)
+        if not isinstance(body, dict):
+            return JSONResponse({"error": "Request body must be a JSON object."}, status_code=400)
+
+        existing = store.load()
+        try:
+            updated = await store.update_from_body(body, existing)
+        except Exception as exc:
+            logger.error("LLM config PUT failed: %s", exc)
+            _audit("manage_llm_put", "write", "error")
+            return JSONResponse({"error": str(exc)}, status_code=500)
+
+        _audit("manage_llm_put", "write", "success")
+        return JSONResponse(store.to_display(updated))
+
+    @mcp.custom_route(MANAGE_LLM_TIER_PATH, methods=["PATCH"])
+    async def manage_llm_tier_patch(request: Request) -> JSONResponse:
+        """Update a single model-tier assignment."""
+        claims, error = await _require_admin(request)
+        if error is not None:
+            return error
+        tier = str(request.path_params.get("tier") or "").strip().lower()
+        if tier not in TIERS:
+            return JSONResponse(
+                {"error": f"'tier' must be one of {sorted(TIERS)}."},
+                status_code=400,
+            )
+        try:
+            store = _get_llm_store()
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=503)
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "Invalid JSON body."}, status_code=400)
+        if not isinstance(body, dict):
+            return JSONResponse({"error": "Request body must be a JSON object."}, status_code=400)
+        provider = str((body or {}).get("provider") or "").strip().lower()
+        model = str((body or {}).get("model") or "").strip()
+        if provider and provider not in PROVIDERS:
+            return JSONResponse(
+                {"error": f"'provider' must be one of {sorted(PROVIDERS)} or empty."},
+                status_code=400,
+            )
+        try:
+            updated = await store.update_tier(tier, provider, model)
+        except Exception as exc:
+            logger.error("LLM tier PATCH failed: %s", exc)
+            _audit("manage_llm_tier_patch", "write", "error", args={"tier": tier})
+            return JSONResponse({"error": str(exc)}, status_code=500)
+        _audit("manage_llm_tier_patch", "write", "success", args={"tier": tier})
+        return JSONResponse(store.to_display(updated))
+
+    @mcp.custom_route(MANAGE_LLM_TEST_PATH, methods=["POST"])
+    async def manage_llm_test(request: Request) -> JSONResponse:
+        """Validate a provider API key by making a minimal live request."""
+        claims, error = await _require_admin(request)
+        if error is not None:
+            return error
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "Invalid JSON body."}, status_code=400)
+        provider = str((body or {}).get("provider") or "").strip().lower()
+        api_key = str((body or {}).get("api_key") or "").strip()
+        base_url = str((body or {}).get("base_url") or "").strip()
+        if provider not in PROVIDERS:
+            return JSONResponse(
+                {"error": f"'provider' must be one of {sorted(PROVIDERS)}."},
+                status_code=400,
+            )
+        if not api_key:
+            # If no key is provided, try to use the stored key for this provider.
+            store = get_store(config)
+            if store is not None:
+                llm_cfg = store.load()
+                if llm_cfg is not None:
+                    pentry = llm_cfg.providers.get(provider)
+                    if pentry:
+                        api_key = pentry.api_key or ""
+        if not api_key:
+            return JSONResponse(
+                {"error": f"No API key provided or stored for provider '{provider}'."},
+                status_code=400,
+            )
+
+        ok, message = await _test_provider(provider, api_key, base_url)
+        if ok:
+            _audit("manage_llm_test", "read", "success", args={"provider": provider})
+            return JSONResponse({"ok": True, "message": message})
+        _audit("manage_llm_test", "read", "error", args={"provider": provider})
+        return JSONResponse({"ok": False, "message": message}, status_code=502)
+
+
+async def _test_provider(provider: str, api_key: str, base_url: str) -> tuple[bool, str]:
+    """Make a minimal API call to check that the key is valid.
+
+    Returns ``(success, message)`` — never raises.
+    """
+    import httpx
+
+    from .llm.config_store import DEFAULT_BASE_URLS
+
+    url_base = base_url.strip().rstrip("/") or DEFAULT_BASE_URLS.get(provider, "")
+    headers = {"Content-Type": "application/json"}
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            if provider == "openai":
+                headers["Authorization"] = "Bearer " + api_key
+                resp = await client.get(f"{url_base}/models", headers=headers)
+                if resp.status_code in (200, 206):
+                    return True, "OpenAI connection successful."
+                return False, f"OpenAI returned HTTP {resp.status_code}."
+
+            elif provider == "anthropic":
+                headers["x-api-key"] = api_key
+                headers["anthropic-version"] = "2023-06-01"
+                # Use the models endpoint for a cheap, key-validating request.
+                resp = await client.get(f"{url_base}/models", headers=headers)
+                if resp.status_code in (200, 206):
+                    return True, "Anthropic connection successful."
+                return False, f"Anthropic returned HTTP {resp.status_code}."
+
+            elif provider == "gemini":
+                # List models via REST; the API key goes in the query string.
+                resp = await client.get(
+                    f"{url_base}/models",
+                    params={"key": api_key},
+                )
+                if resp.status_code in (200, 206):
+                    return True, "Gemini connection successful."
+                return False, f"Gemini returned HTTP {resp.status_code}."
+
+            return False, f"Unknown provider: {provider}"
+    except Exception as exc:
+        return False, f"Connection error: {exc}"

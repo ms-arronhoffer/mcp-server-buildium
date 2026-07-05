@@ -28,6 +28,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     import httpx
 
     from ..config import BuildiumConfig
+    from .config_store import LLMConfig
 
 # ---------------------------------------------------------------------------
 # Task types
@@ -210,6 +211,7 @@ class ModelRouter(LLMProvider):
         strategy: str = "classifier",
         *,
         pinned_model: str | None = None,
+        task_map: dict[str, RouterEntry] | None = None,
     ) -> None:
         """
         Args:
@@ -218,12 +220,18 @@ class ModelRouter(LLMProvider):
                 ``"fallback"`` (try entries in config order).
             pinned_model: When set, only the entry whose model matches this
                 string is used (no classification, no fallback to other models).
+            task_map: Optional direct mapping of task-type string →
+                :class:`RouterEntry`. When provided and the router is in
+                classifier mode, the entry is looked up directly instead of
+                sorting by ``_TASK_PREFERENCES``. Used by the store-based
+                router so each tier's exact configured model is used.
         """
         # Pass dummy credentials — the router delegates to concrete providers.
         super().__init__(api_key="", model="router", base_url="")
         self._entries = entries
         self._strategy = strategy.strip().lower()
         self._pinned_model = pinned_model
+        self._task_map = task_map or {}
         # Sticky state — set on the first complete() call.
         self._active_entry: RouterEntry | None = None
 
@@ -278,6 +286,16 @@ class ModelRouter(LLMProvider):
 
         # classifier strategy
         task_type, reason = classify_task(messages)
+
+        # Store-based direct task map: return the single configured entry for
+        # this task type (no preference sorting needed).
+        if self._task_map:
+            entry = self._task_map.get(task_type)
+            if entry is not None:
+                return [entry], reason
+            # Task type not in map — fall back to full entries list.
+            return list(self._entries), reason
+
         return _sort_by_task(self._entries, task_type), reason
 
 
@@ -370,3 +388,90 @@ def build_router(
 
     strategy = (config.llm_router_strategy or "classifier").strip().lower()
     return ModelRouter(entries=entries, strategy=strategy, pinned_model=pinned_model)
+
+
+def build_router_from_store(
+    llm_cfg: "LLMConfig",
+    *,
+    pinned_model: str | None = None,
+    client: "httpx.AsyncClient | None" = None,
+) -> ModelRouter:
+    """Construct a :class:`ModelRouter` from an :class:`~.config_store.LLMConfig`.
+
+    This is the preferred factory when the admin-UI config store is active. It
+    reads provider keys and per-tier model assignments directly from *llm_cfg*
+    (already loaded from disk) rather than from ``BuildiumConfig`` env fields.
+
+    Each configured tier becomes a :class:`RouterEntry`. A ``task_map`` is
+    built so the classifier's output maps directly to the tier's entry without
+    going through preference-sorting.
+
+    Args:
+        llm_cfg: Loaded and decrypted LLM configuration from the store.
+        pinned_model: Optional model to pin for the returned router.
+        client: Optional shared ``httpx.AsyncClient`` (mainly for tests).
+
+    Raises:
+        ValueError: when no tiers are configured in the store.
+    """
+    from .config_store import TIER_TO_TASK
+    from .providers import AnthropicProvider, GeminiProvider, OpenAIProvider
+
+    _provider_classes: dict[str, type[LLMProvider]] = {
+        "openai": OpenAIProvider,
+        "anthropic": AnthropicProvider,
+        "gemini": GeminiProvider,
+    }
+
+    configured = llm_cfg.get_configured_tiers()
+    if not configured:
+        raise ValueError(
+            "No tiers are configured in the LLM config store. "
+            "Open the admin UI at /manage/ to assign a provider and model to each tier."
+        )
+
+    entries: list[RouterEntry] = []
+    task_map: dict[str, RouterEntry] = {}
+
+    # Deduplicate: multiple tiers may share the same provider+model. Build one
+    # provider instance per (provider_name, model, api_key) triple.
+    _instance_cache: dict[tuple[str, str, str], LLMProvider] = {}
+
+    for tier_name, tier in configured.items():
+        pname = tier.provider.strip().lower()
+        model = tier.model.strip()
+        provider_entry = llm_cfg.providers.get(pname)
+        if provider_entry is None:
+            continue
+        api_key = provider_entry.api_key or ""
+        base_url = provider_entry.effective_base_url()
+        cls = _provider_classes.get(pname)
+        if cls is None:
+            continue
+
+        cache_key = (pname, model, api_key)
+        if cache_key not in _instance_cache:
+            _instance_cache[cache_key] = cls(
+                api_key=api_key, model=model, base_url=base_url, client=client
+            )
+        provider_instance = _instance_cache[cache_key]
+
+        entry = RouterEntry(provider_name=pname, model=model, provider=provider_instance)
+        entries.append(entry)
+
+        task_type = TIER_TO_TASK.get(tier_name)
+        if task_type:
+            task_map[task_type] = entry
+
+    if not entries:
+        raise ValueError(
+            "No valid provider entries could be built from the LLM config store. "
+            "Check that each configured tier has a valid provider name and API key."
+        )
+
+    return ModelRouter(
+        entries=entries,
+        strategy="classifier",
+        pinned_model=pinned_model,
+        task_map=task_map,
+    )

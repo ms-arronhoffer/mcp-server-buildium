@@ -225,6 +225,56 @@ function renderDownloadButtons(client, browsers) {
   el("download-extension").hidden = browsers.length === 0;
 }
 
+/** Render the LLM tier summary table from a config object. */
+function renderLlmTiers(cfg) {
+  const area = el("llm-tiers-area");
+  area.innerHTML = "";
+  if (!cfg || !cfg.tiers) {
+    area.textContent = "No LLM configuration saved yet.";
+    return;
+  }
+  const table = document.createElement("table");
+  table.innerHTML = `
+    <thead><tr>
+      <th scope="col">Tier</th>
+      <th scope="col">Provider</th>
+      <th scope="col">Model</th>
+    </tr></thead>
+    <tbody id="llm-tier-rows"></tbody>`;
+  area.appendChild(table);
+  const tbody = document.getElementById("llm-tier-rows");
+  for (const [tier, entry] of Object.entries(cfg.tiers || {})) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${tier}</td><td>${entry.provider || "—"}</td><td>${entry.model || "—"}</td>`;
+    tbody.appendChild(tr);
+  }
+}
+
+function llmStatus(msg) {
+  el("llm-status").textContent = msg;
+}
+
+function showLlmErrors(errs) {
+  const ul = el("llm-errors");
+  ul.innerHTML = "";
+  for (const e of errs) {
+    const li = document.createElement("li");
+    li.textContent = e;
+    ul.appendChild(li);
+  }
+}
+
+async function refreshLlmConfig(client) {
+  try {
+    const cfg = await client.getLlmConfig();
+    renderLlmTiers(cfg);
+    llmStatus("Refreshed ✓");
+  } catch (err) {
+    showLlmErrors([err.message]);
+  }
+}
+
+
 /**
  * Query the server for management capabilities and, when the caller is an admin,
  * reveal and wire up the admin panel. Silently hides the panel otherwise (the
@@ -277,6 +327,18 @@ async function initAdminPanel() {
   el("refresh-users").onclick = () => refreshUsers(client, roles);
 
   await refreshUsers(client, roles);
+
+  // LLM config panel (shown only when server reports llmConfigured capability).
+  if (caps.llmConfigured !== undefined) {
+    const llmPanel = el("llm-config-panel");
+    llmPanel.hidden = false;
+
+    const serverUrl = (cfg.mcpServerUrl || "").replace(/\/+$/, "");
+    el("open-llm-ui-btn").onclick = () => window.open(`${serverUrl}/manage/`, "_blank");
+    el("refresh-llm-btn").onclick = () => refreshLlmConfig(client);
+
+    await refreshLlmConfig(client);
+  }
 }
 
 populate();
