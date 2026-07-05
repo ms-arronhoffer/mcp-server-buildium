@@ -185,3 +185,20 @@ npm run build
 (cd dist/chrome && zip -r ../buildium-mcp-sidebar-chrome.zip .)
 (cd dist/firefox && zip -r ../buildium-mcp-sidebar-firefox.xpi .)
 ```
+
+These archives are also what the server's admin **management** feature serves
+from `GET /manage/extension` (when `BUILDIUM_MANAGEMENT_EXTENSION_CHROME_PATH` /
+`_FIREFOX_PATH` point at them). Build them with your deployment's public
+defaults baked in so recipients don't have to enter any settings.
+
+## Administration (admin panel)
+
+When the server has the management routes enabled
+(`BUILDIUM_MANAGEMENT_ENABLED=true`) and you sign in as an **admin**, the
+options page reveals an *Administration* panel. From it you can invite Microsoft
+Entra B2B guests with a role, change existing users' roles, and download the
+preconfigured extension to distribute. The panel is only shown when the server
+reports the caller is an admin (via `GET /manage/capabilities`); the server
+enforces admin access on every action regardless of the UI. See
+`docs/security-and-audit.md` for the required Microsoft Graph configuration.
+

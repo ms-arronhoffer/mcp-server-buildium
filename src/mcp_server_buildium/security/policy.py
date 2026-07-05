@@ -223,6 +223,31 @@ def effective_policy_for_claims(
     return CombinedPolicy((base, ToolPolicy(role=_most_permissive(matched))))
 
 
+def is_admin_claims(config, claims: dict) -> bool:  # noqa: ANN001 - avoid import cycle
+    """Return True when the caller resolves to the coarse ``admin`` role.
+
+    This reuses the exact admin notion that governs :data:`ADMIN_ONLY_TOOLS`:
+    the caller's effective policy (server-wide ceiling intersected with their
+    Entra App Role, via :func:`effective_policy_for_claims`) must permit every
+    admin-only tool. So a caller is "admin" iff their token maps — through
+    ``BUILDIUM_ENTRA_ROLE_POLICY_MAP`` — to the ``admin`` role (and the server
+    role ceiling is also ``admin``). When no role map is configured the decision
+    falls back to the server-wide role, matching non-scoped behavior.
+
+    Args:
+        config: A :class:`~mcp_server_buildium.config.BuildiumConfig`-like object.
+        claims: Verified JWT claims (empty dict when no token was validated).
+
+    Returns:
+        Whether the caller is authorized for admin-only management actions.
+    """
+    base = ToolPolicy.from_config(config)
+    role_map = config.get_entra_role_policy_map()
+    effective = effective_policy_for_claims(base, role_map, claims or {})
+    probes = ADMIN_ONLY_TOOLS or frozenset({"audit_summary"})
+    return all(effective.is_allowed(tool) for tool in probes)
+
+
 class RateLimiter:
     """A simple in-process sliding-window rate limiter.
 
