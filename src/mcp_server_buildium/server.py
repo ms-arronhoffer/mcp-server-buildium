@@ -10,6 +10,7 @@ from .buildium_client import BuildiumClient
 from .chat_endpoint import register_chat_routes
 from .config import BuildiumConfig
 from .logging_config import configure_logging, get_logger
+from .management_endpoint import register_management_routes
 from .security.policy import RateLimiter, ToolPolicy
 from .security.registration import GuardedMCP
 from .security.scoping import EntraScopingMiddleware
@@ -117,6 +118,14 @@ register_chat_routes(mcp, config, auth, policy)
 if config.llm_enabled():
     logger.info("Server-side assistant enabled (provider=%s)", config.get_llm_provider())
 
+# Register the admin-only management HTTP routes (/manage/*). Gated by the same
+# Entra auth as /mcp; each mutating route additionally requires the caller to
+# resolve to the coarse ``admin`` role. Microsoft Graph credentials stay
+# server-side. The routes are inert unless BUILDIUM_MANAGEMENT_ENABLED=true.
+register_management_routes(mcp, config, auth, audit_recorder)
+if config.management_active():
+    logger.info("Admin management routes enabled (/manage/*)")
+
 
 @mcp.tool()
 async def health_check() -> dict[str, Any]:
@@ -190,7 +199,7 @@ def _build_cors_middleware() -> list:
             Middleware(
                 CORSMiddleware,
                 allow_origins=origins,
-                allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+                allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
                 allow_headers=["Authorization", "Content-Type", "Mcp-Session-Id"],
                 expose_headers=["Mcp-Session-Id"],
                 allow_credentials="*" not in origins,

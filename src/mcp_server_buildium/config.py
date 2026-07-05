@@ -15,6 +15,9 @@ ROLES = frozenset({"readonly", "operator", "admin", "custom"})
 # Coarse roles an Entra App Role / group may map to (custom is server-only).
 ENTRA_MAPPABLE_ROLES = frozenset({"readonly", "operator", "admin"})
 
+# Browsers for which a prebuilt, preconfigured extension archive may be served.
+MANAGEMENT_BROWSERS = frozenset({"chrome", "firefox"})
+
 # Valid audit sink names.
 AUDIT_SINKS = frozenset({"log", "file", "none"})
 
@@ -168,6 +171,94 @@ class BuildiumConfig(BaseSettings):
             "role/group are denied all tools. Example: "
             '\'{"Buildium.Admin":"admin","Buildium.Operator":"operator",'
             '"Buildium.ReadOnly":"readonly"}\'.'
+        ),
+    )
+
+    # --- Admin management (/manage/* custom routes) ------------------------
+    # Optional admin-only capability, gated by the SAME Entra JWT auth as the
+    # MCP endpoint. A caller must resolve to the coarse ``admin`` role (via
+    # BUILDIUM_ENTRA_ROLE_POLICY_MAP) to use any /manage/* route. All Microsoft
+    # Graph credentials stay server-side and are never returned to the browser.
+    management_enabled: bool = Field(
+        default=False,
+        description=(
+            "Enable the admin-only management routes (/manage/*): invite Entra B2B "
+            "guests with a role, edit user roles, and download a preconfigured "
+            "extension. Off by default. Requires the Microsoft Graph settings below "
+            "and (for role gating) BUILDIUM_ENTRA_ROLE_POLICY_MAP."
+        ),
+    )
+    graph_tenant_id: str | None = Field(
+        default=None,
+        description=(
+            "Entra tenant ID for the Microsoft Graph app-only (client-credentials) "
+            "token used by the management routes. Defaults to BUILDIUM_ENTRA_TENANT_ID "
+            "when unset."
+        ),
+    )
+    graph_client_id: str | None = Field(
+        default=None,
+        description=(
+            "Client ID of the Entra app registration used for app-only Microsoft Graph "
+            "calls (needs application permissions User.Invite.All, "
+            "AppRoleAssignment.ReadWrite.All, Application.Read.All, admin-consented). "
+            "Required when management is enabled."
+        ),
+    )
+    graph_client_secret: str | None = Field(
+        default=None,
+        description=(
+            "Client secret for the Microsoft Graph app registration. Server-side only; "
+            "never returned by any endpoint. Required when management is enabled."
+        ),
+    )
+    graph_base_url: str = Field(
+        default="https://graph.microsoft.com/v1.0",
+        description="Base URL for the Microsoft Graph API used by the management routes.",
+    )
+    entra_api_service_principal_id: str | None = Field(
+        default=None,
+        description=(
+            "Object ID of the API app's service principal (enterprise application) in "
+            "the tenant. App-role assignments are created/removed on this service "
+            "principal. Required when management is enabled."
+        ),
+    )
+    entra_app_role_id_map: str | None = Field(
+        default=None,
+        description=(
+            "JSON object mapping coarse role names ('admin'/'operator'/'readonly') to "
+            "the API app's Entra App Role IDs (GUIDs). Used to assign/read a user's "
+            "role. Required when management is enabled. Example: "
+            '\'{"admin":"<guid>","operator":"<guid>","readonly":"<guid>"}\'.'
+        ),
+    )
+    management_invite_redirect_url: str | None = Field(
+        default=None,
+        description=(
+            "Optional inviteRedirectUrl sent with Entra B2B invitations (where the "
+            "guest lands after redeeming). Defaults to the Microsoft 365 apps portal."
+        ),
+    )
+    management_send_invitation_message: bool = Field(
+        default=True,
+        description=(
+            "Whether Entra should email the B2B invitation message to the invited "
+            "guest (sendInvitationMessage). When false, no email is sent."
+        ),
+    )
+    management_extension_chrome_path: str | None = Field(
+        default=None,
+        description=(
+            "Filesystem path to the prebuilt, preconfigured Chrome extension archive "
+            "(.zip) served by GET /manage/extension?browser=chrome."
+        ),
+    )
+    management_extension_firefox_path: str | None = Field(
+        default=None,
+        description=(
+            "Filesystem path to the prebuilt, preconfigured Firefox extension archive "
+            "(.xpi) served by GET /manage/extension?browser=firefox."
         ),
     )
 
@@ -385,6 +476,7 @@ class BuildiumConfig(BaseSettings):
         if self.rate_limit_per_minute < 0:
             raise ValueError("BUILDIUM_RATE_LIMIT_PER_MINUTE must be >= 0")
         self._validate_llm()
+        self._validate_management()
         return self
 
     def _validate_llm(self) -> None:
@@ -472,6 +564,84 @@ class BuildiumConfig(BaseSettings):
                 f"BUILDIUM_LLM_ROUTER_STRATEGY must be one of "
                 f"{sorted(LLM_ROUTER_STRATEGIES)}, got {self.llm_router_strategy!r}"
             )
+
+    def _validate_management(self) -> None:
+        """Validate the optional admin management configuration.
+
+        When BUILDIUM_MANAGEMENT_ENABLED=true, the Microsoft Graph app-only
+        credentials, the API app's service-principal object ID, and the
+        role→App-Role-ID map must all be present so the management routes can
+        invite guests and assign roles. The role gate additionally relies on
+        BUILDIUM_ENTRA_ROLE_POLICY_MAP being configured (validated separately).
+        """
+        if not self.management_enabled:
+            # Still validate the role-ID map shape if provided, to fail fast.
+            self._parse_app_role_id_map()
+            return
+        if not (self.get_graph_tenant_id() or "").strip():
+            raise ValueError(
+                "BUILDIUM_MANAGEMENT_ENABLED=true requires a Graph tenant "
+                "(set BUILDIUM_GRAPH_TENANT_ID or BUILDIUM_ENTRA_TENANT_ID)"
+            )
+        if not (self.graph_client_id and self.graph_client_id.strip()):
+            raise ValueError(
+                "BUILDIUM_MANAGEMENT_ENABLED=true requires BUILDIUM_GRAPH_CLIENT_ID"
+            )
+        if not (self.graph_client_secret and self.graph_client_secret.strip()):
+            raise ValueError(
+                "BUILDIUM_MANAGEMENT_ENABLED=true requires BUILDIUM_GRAPH_CLIENT_SECRET"
+            )
+        if not (
+            self.entra_api_service_principal_id
+            and self.entra_api_service_principal_id.strip()
+        ):
+            raise ValueError(
+                "BUILDIUM_MANAGEMENT_ENABLED=true requires "
+                "BUILDIUM_ENTRA_API_SERVICE_PRINCIPAL_ID"
+            )
+        role_ids = self._parse_app_role_id_map()
+        if not role_ids:
+            raise ValueError(
+                "BUILDIUM_MANAGEMENT_ENABLED=true requires "
+                "BUILDIUM_ENTRA_APP_ROLE_ID_MAP (a JSON object mapping "
+                "'admin'/'operator'/'readonly' to Entra App Role IDs)"
+            )
+
+    def _parse_app_role_id_map(self) -> dict[str, str]:
+        """Parse and validate BUILDIUM_ENTRA_APP_ROLE_ID_MAP.
+
+        Returns an empty dict when unset; raises ``ValueError`` on malformed
+        input (bad JSON, unknown role key, or non-string App Role ID value).
+        """
+        raw = self.entra_app_role_id_map
+        if not (raw and raw.strip()):
+            return {}
+        try:
+            parsed = json.loads(raw)
+        except (ValueError, TypeError) as exc:
+            raise ValueError(
+                "BUILDIUM_ENTRA_APP_ROLE_ID_MAP must be a valid JSON object mapping "
+                "coarse role names to Entra App Role IDs"
+            ) from exc
+        if not isinstance(parsed, dict) or not parsed:
+            raise ValueError(
+                "BUILDIUM_ENTRA_APP_ROLE_ID_MAP must be a non-empty JSON object"
+            )
+        result: dict[str, str] = {}
+        for key, value in parsed.items():
+            role = str(key).strip().lower()
+            if role not in ENTRA_MAPPABLE_ROLES:
+                raise ValueError(
+                    f"BUILDIUM_ENTRA_APP_ROLE_ID_MAP key {key!r} must be one of "
+                    f"{sorted(ENTRA_MAPPABLE_ROLES)}"
+                )
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(
+                    f"BUILDIUM_ENTRA_APP_ROLE_ID_MAP value for {key!r} must be a "
+                    "non-empty App Role ID string"
+                )
+            result[role] = value.strip()
+        return result
 
     @classmethod
     def from_env(cls) -> "BuildiumConfig":
@@ -585,6 +755,42 @@ class BuildiumConfig(BaseSettings):
             return None
         parsed = json.loads(self.entra_role_policy_map)
         return {str(k): str(v).strip().lower() for k, v in parsed.items()}
+
+    # --- Admin management helpers ------------------------------------------
+    def management_active(self) -> bool:
+        """Return True when the admin management routes are enabled."""
+        return bool(self.management_enabled)
+
+    def get_graph_tenant_id(self) -> str | None:
+        """Return the tenant used for Microsoft Graph app-only tokens.
+
+        Falls back to the Entra JWT tenant when a dedicated Graph tenant is not
+        configured.
+        """
+        if self.graph_tenant_id and self.graph_tenant_id.strip():
+            return self.graph_tenant_id.strip()
+        if self.entra_tenant_id and self.entra_tenant_id.strip():
+            return self.entra_tenant_id.strip()
+        return None
+
+    def get_entra_app_role_id_map(self) -> dict[str, str]:
+        """Return the coarse-role → App Role ID map (empty dict when unset)."""
+        return self._parse_app_role_id_map()
+
+    def get_app_role_id_to_role(self) -> dict[str, str]:
+        """Return the reverse App Role ID → coarse-role map (empty when unset)."""
+        return {v: k for k, v in self.get_entra_app_role_id_map().items()}
+
+    def get_management_extension_path(self, browser: str) -> str | None:
+        """Return the configured prebuilt-archive path for ``browser`` or None."""
+        key = (browser or "").strip().lower()
+        if key == "chrome":
+            path = self.management_extension_chrome_path
+        elif key == "firefox":
+            path = self.management_extension_firefox_path
+        else:
+            return None
+        return path.strip() if (path and path.strip()) else None
 
     def get_cors_origins(self) -> list[str] | None:
         """Return allowed CORS origins as a list, or None when unset."""
