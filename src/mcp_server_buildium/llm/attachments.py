@@ -30,9 +30,7 @@ from typing import Any
 # Media types the assistant accepts. Images and PDFs are handled natively by the
 # multimodal providers; DOCX and plain text are extracted to text server-side
 # (see :func:`extract_text`) because no provider ingests them natively.
-IMAGE_MEDIA_TYPES = frozenset(
-    {"image/png", "image/jpeg", "image/webp"}
-)
+IMAGE_MEDIA_TYPES = frozenset({"image/png", "image/jpeg", "image/webp"})
 PDF_MEDIA_TYPE = "application/pdf"
 DOCX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 TEXT_MEDIA_TYPES = frozenset({"text/plain", "text/csv", "text/markdown"})
@@ -140,9 +138,7 @@ def normalize_attachments(
                 f"Attachment #{index + 1} ({name!r}) is too large "
                 f"({len(decoded)} bytes; maximum {max_bytes})."
             )
-        out.append(
-            Attachment(name=name, media_type=media_type, data=decoded, data_b64=data_b64)
-        )
+        out.append(Attachment(name=name, media_type=media_type, data=decoded, data_b64=data_b64))
     return out
 
 

@@ -59,6 +59,7 @@ def _attachment_text_block(att: Attachment) -> str:
         "you need from it."
     )
 
+
 # ---------------------------------------------------------------------------
 # OpenAI (Chat Completions)
 # ---------------------------------------------------------------------------
@@ -142,9 +143,7 @@ def openai_messages(messages: list[Message]) -> list[dict[str, Any]]:
                 }
             )
         elif role == "user" and m.get("attachments"):
-            content: list[dict[str, Any]] = [
-                {"type": "text", "text": m.get("content") or ""}
-            ]
+            content: list[dict[str, Any]] = [{"type": "text", "text": m.get("content") or ""}]
             content.extend(openai_attachment_parts(m["attachments"]))
             out.append({"role": "user", "content": content})
         else:
@@ -264,9 +263,7 @@ def anthropic_messages(messages: list[Message]) -> tuple[str, list[dict[str, Any
             if m.get("content"):
                 system_parts.append(m["content"])
         elif role == "user":
-            user_content: list[dict[str, Any]] = [
-                {"type": "text", "text": m.get("content") or ""}
-            ]
+            user_content: list[dict[str, Any]] = [{"type": "text", "text": m.get("content") or ""}]
             if m.get("attachments"):
                 user_content.extend(anthropic_attachment_blocks(m["attachments"]))
             out.append({"role": "user", "content": user_content})
@@ -419,9 +416,7 @@ def gemini_attachment_parts(attachments: list[Attachment]) -> list[dict[str, Any
     parts: list[dict[str, Any]] = []
     for att in attachments:
         if att.is_image() or att.is_pdf():
-            parts.append(
-                {"inline_data": {"mime_type": att.media_type, "data": att.data_b64}}
-            )
+            parts.append({"inline_data": {"mime_type": att.media_type, "data": att.data_b64}})
         else:
             parts.append({"text": _attachment_text_block(att)})
     return parts
@@ -446,9 +441,7 @@ def gemini_contents(messages: list[Message]) -> tuple[dict[str, Any] | None, lis
             if m.get("content"):
                 parts.append({"text": m["content"]})
             for tc in m.get("tool_calls") or []:
-                fc_part: dict[str, Any] = {
-                    "functionCall": {"name": tc.name, "args": tc.arguments}
-                }
+                fc_part: dict[str, Any] = {"functionCall": {"name": tc.name, "args": tc.arguments}}
                 # Gemini 2.5+ requires the ``thoughtSignature`` returned with a
                 # functionCall to be echoed back verbatim, or it rejects the
                 # request with a 400 ("missing a thought_signature").

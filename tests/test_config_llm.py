@@ -229,4 +229,3 @@ def test_router_get_llm_base_url_returns_none():
     """In router mode get_llm_base_url() returns None."""
     cfg = _router_cfg()
     assert cfg.get_llm_base_url() is None
-

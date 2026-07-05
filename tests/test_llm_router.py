@@ -157,7 +157,9 @@ class _StubProvider(LLMProvider):
 
 
 def _entries(*names: str) -> list[RouterEntry]:
-    return [RouterEntry(provider_name=n, model=f"{n}-model", provider=_StubProvider()) for n in names]
+    return [
+        RouterEntry(provider_name=n, model=f"{n}-model", provider=_StubProvider()) for n in names
+    ]
 
 
 def test_sort_reasoning_prefers_anthropic_first():
@@ -289,9 +291,7 @@ async def test_router_classifier_strategy_routes_extraction_to_openai():
     router = ModelRouter([e1, e2], strategy="classifier")
 
     # Extraction prompt → openai preferred
-    completion = await router.complete(
-        [_user("extract fields", attachments=_fake_att())], []
-    )
+    completion = await router.complete([_user("extract fields", attachments=_fake_att())], [])
     assert completion.content == "openai-answer"
     assert completion.routing_info["provider"] == "openai"
     assert p_anthropic.calls == 0
@@ -370,9 +370,7 @@ def test_build_router_with_pinned_model():
         client_id="cid",
         client_secret="secret",
         llm_router_enabled=True,
-        llm_router_providers=json.dumps(
-            [{"provider": "openai", "model": "gpt-4o"}]
-        ),
+        llm_router_providers=json.dumps([{"provider": "openai", "model": "gpt-4o"}]),
         llm_openai_api_key="sk-key",
     )
     router = build_router(cfg, pinned_model="gpt-4o")
@@ -452,7 +450,7 @@ def _sse_events(text: str) -> list[dict]:
     events = []
     for line in text.splitlines():
         if line.startswith("data:"):
-            events.append(json.loads(line[len("data:"):].strip()))
+            events.append(json.loads(line[len("data:") :].strip()))
     return events
 
 
@@ -558,7 +556,5 @@ def test_chat_router_empty_model_allowed(router_client, monkeypatch) -> None:
 
     monkeypatch.setattr(chat_endpoint, "build_llm", lambda *a, **k: StubRouter())
 
-    resp = router_client.post(
-        "/chat", json={"messages": [{"role": "user", "content": "hi"}]}
-    )
+    resp = router_client.post("/chat", json={"messages": [{"role": "user", "content": "hi"}]})
     assert resp.status_code == 200

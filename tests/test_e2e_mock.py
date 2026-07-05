@@ -283,7 +283,11 @@ def test_partial_bill_update(tools, run):
 def test_partial_bank_account_update(tools, run):
     """Bank account partial edits preserve the required CheckPrintingInfo/Country."""
     result = _ok(
-        run(tools["update_bank_account"].fn(bank_account_id=1, bank_account_data={"Description": "new"}))
+        run(
+            tools["update_bank_account"].fn(
+                bank_account_id=1, bank_account_data={"Description": "new"}
+            )
+        )
     )
     assert result["data"]["Description"] == "new"
 

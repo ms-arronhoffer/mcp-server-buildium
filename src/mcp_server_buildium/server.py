@@ -168,9 +168,7 @@ def _build_cors_middleware() -> list:
     class _SecurityHeadersMiddleware(BaseHTTPMiddleware):
         """Add hardening headers to every HTTP response."""
 
-        async def dispatch(
-            self, request: Request, call_next: RequestResponseEndpoint
-        ) -> Response:
+        async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
             response = await call_next(request)
             response.headers.setdefault("X-Content-Type-Options", "nosniff")
             response.headers.setdefault("X-Frame-Options", "DENY")

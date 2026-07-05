@@ -61,9 +61,7 @@ def test_inactive_without_role_map() -> None:
 
 
 def test_inactive_without_entra() -> None:
-    cfg = BuildiumConfig(
-        client_id="id", client_secret="secret", entra_role_policy_map=ROLE_MAP
-    )
+    cfg = BuildiumConfig(client_id="id", client_secret="secret", entra_role_policy_map=ROLE_MAP)
     mw = EntraScopingMiddleware(cfg, ToolPolicy(role="admin"))
     assert mw.active is False
 

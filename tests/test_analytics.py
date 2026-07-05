@@ -34,6 +34,7 @@ async def _get_tool(client: Any, name: str) -> Any:
 # Fake API implementations
 # ---------------------------------------------------------------------------
 
+
 class _LeasesApi:
     def __init__(self, by_status: dict[str, list[dict[str, Any]]]) -> None:
         self._by_status = by_status
@@ -103,9 +104,7 @@ class _BillsApi:
     def __init__(self, bills: list[dict[str, Any]]) -> None:
         self._bills = bills
 
-    async def external_api_bills_get_bills_async(
-        self, **kwargs: Any
-    ) -> list[dict[str, Any]]:
+    async def external_api_bills_get_bills_async(self, **kwargs: Any) -> list[dict[str, Any]]:
         return self._bills if kwargs.get("offset", 0) == 0 else []
 
 
@@ -217,11 +216,7 @@ async def test_budget_variance_report_flags_over_threshold() -> None:
 @pytest.mark.asyncio
 async def test_budget_variance_report_no_transactions() -> None:
     budgets = [
-        {
-            "BudgetLines": [
-                {"GLAccount": {"Id": 5, "Name": "Utilities"}, "AnnualAmount": 500.0}
-            ]
-        }
+        {"BudgetLines": [{"GLAccount": {"Id": 5, "Name": "Utilities"}, "AnnualAmount": 500.0}]}
     ]
     client = _AnalyticsClient(budgets_api=_BudgetsApi(budgets), general_ledger_api=_GLApi([]))
     tool = await _get_tool(client, "budget_variance_report")
@@ -289,7 +284,15 @@ async def test_vacancy_analysis_future_lease_sets_next_occupancy() -> None:
     units = [{"Id": 200, "PropertyId": 20, "UnitNumber": "2A"}]
     leases = {
         "Active": [],
-        "Past": [{"Id": 3, "UnitId": 200, "PropertyId": 20, "AccountDetails": {"Rent": 1000.0}, "LeaseToDate": "2026-06-01"}],
+        "Past": [
+            {
+                "Id": 3,
+                "UnitId": 200,
+                "PropertyId": 20,
+                "AccountDetails": {"Rent": 1000.0},
+                "LeaseToDate": "2026-06-01",
+            }
+        ],
         "Future": [{"Id": 4, "UnitId": 200, "PropertyId": 20, "LeaseFromDate": "2026-08-01"}],
     }
     client = _AnalyticsClient(
@@ -332,14 +335,28 @@ async def test_rent_trend_report_flags_under_market_lease() -> None:
     leases = {
         "Active": [
             # Reference lease at market rate
-            {"Id": 1, "PropertyId": 10, "UnitId": 100, "AccountDetails": {"Rent": 1000.0}, "LeaseToDate": "2026-08-15"},
+            {
+                "Id": 1,
+                "PropertyId": 10,
+                "UnitId": 100,
+                "AccountDetails": {"Rent": 1000.0},
+                "LeaseToDate": "2026-08-15",
+            },
             # Under-market lease expiring in 60 days
-            {"Id": 2, "PropertyId": 10, "UnitId": 101, "AccountDetails": {"Rent": 800.0}, "LeaseToDate": "2026-09-01"},
+            {
+                "Id": 2,
+                "PropertyId": 10,
+                "UnitId": 101,
+                "AccountDetails": {"Rent": 800.0},
+                "LeaseToDate": "2026-09-01",
+            },
         ]
     }
     client = _AnalyticsClient(leases_api=_LeasesApi(leases))
     tool = await _get_tool(client, "rent_trend_report")
-    result = await tool.fn(as_of_date="2026-07-01", expiry_window_days=90, under_market_threshold_pct=5.0)
+    result = await tool.fn(
+        as_of_date="2026-07-01", expiry_window_days=90, under_market_threshold_pct=5.0
+    )
     data = result["data"]
     assert result["error"] is None
     opps = data["opportunities"]
@@ -360,7 +377,13 @@ async def test_rent_trend_report_no_expiring_leases() -> None:
     leases = {
         "Active": [
             # Lease far in the future — outside expiry window
-            {"Id": 10, "PropertyId": 5, "UnitId": 50, "AccountDetails": {"Rent": 1500.0}, "LeaseToDate": "2027-01-01"},
+            {
+                "Id": 10,
+                "PropertyId": 5,
+                "UnitId": 50,
+                "AccountDetails": {"Rent": 1500.0},
+                "LeaseToDate": "2027-01-01",
+            },
         ]
     }
     client = _AnalyticsClient(leases_api=_LeasesApi(leases))
@@ -378,9 +401,24 @@ async def test_rent_trend_report_no_expiring_leases() -> None:
 @pytest.mark.asyncio
 async def test_vendor_spend_report_flags_concentration() -> None:
     bills = [
-        {"Id": 1, "Vendor": {"Id": 10, "Name": "ACME Plumbing"}, "Amount": 8000.0, "Date": "2026-06-01"},
-        {"Id": 2, "Vendor": {"Id": 10, "Name": "ACME Plumbing"}, "Amount": 2000.0, "Date": "2026-06-15"},
-        {"Id": 3, "Vendor": {"Id": 20, "Name": "Bob's Landscaping"}, "Amount": 500.0, "Date": "2026-06-20"},
+        {
+            "Id": 1,
+            "Vendor": {"Id": 10, "Name": "ACME Plumbing"},
+            "Amount": 8000.0,
+            "Date": "2026-06-01",
+        },
+        {
+            "Id": 2,
+            "Vendor": {"Id": 10, "Name": "ACME Plumbing"},
+            "Amount": 2000.0,
+            "Date": "2026-06-15",
+        },
+        {
+            "Id": 3,
+            "Vendor": {"Id": 20, "Name": "Bob's Landscaping"},
+            "Amount": 500.0,
+            "Date": "2026-06-20",
+        },
     ]
     client = _AnalyticsClient(bills_api=_BillsApi(bills))
     tool = await _get_tool(client, "vendor_spend_report")
@@ -462,7 +500,9 @@ async def test_cash_flow_projection_computes_horizons() -> None:
 
 @pytest.mark.asyncio
 async def test_cash_flow_projection_flags_below_reserve() -> None:
-    leases = {"Active": [{"Id": 1, "PropertyId": 10, "UnitId": 100, "AccountDetails": {"Rent": 500.0}}]}
+    leases = {
+        "Active": [{"Id": 1, "PropertyId": 10, "UnitId": 100, "AccountDetails": {"Rent": 500.0}}]
+    }
     bills = [{"Id": 1, "Amount": 5000.0, "DueDate": "2026-07-10"}]
     accounts = [{"Id": 1, "Name": "Operating", "Balance": 2000.0, "IsActive": True}]
     client = _AnalyticsClient(
@@ -489,9 +529,18 @@ async def test_maintenance_roi_report_flags_money_pit() -> None:
         ]
     }
     # Work order cost $500 for property 10
-    work_orders = [{"Id": 1, "Property": {"Id": 10}, "Amount": 500.0, "CreatedDateTime": "2026-01-15"}]
+    work_orders = [
+        {"Id": 1, "Property": {"Id": 10}, "Amount": 500.0, "CreatedDateTime": "2026-01-15"}
+    ]
     # Bill cost $4000 for property 10 → total maint $4500, annual rent $12000 → ratio ~37.5%
-    bills = [{"Id": 1, "Entity": {"Id": 10, "EntityType": "Rental"}, "Amount": 4000.0, "Date": "2026-02-01"}]
+    bills = [
+        {
+            "Id": 1,
+            "Entity": {"Id": 10, "EntityType": "Rental"},
+            "Amount": 4000.0,
+            "Date": "2026-02-01",
+        }
+    ]
     client = _AnalyticsClient(
         leases_api=_LeasesApi(leases),
         work_orders_api=_WorkOrdersApi(work_orders),
@@ -543,7 +592,14 @@ async def test_owner_distribution_report_computes_net() -> None:
             {"TransactionType": "Payment", "TotalAmount": 1500.0, "Date": "2026-06-05"},
         ]
     }
-    bills = [{"Id": 1, "Entity": {"Id": 10, "EntityType": "Rental"}, "Amount": 300.0, "Date": "2026-06-10"}]
+    bills = [
+        {
+            "Id": 1,
+            "Entity": {"Id": 10, "EntityType": "Rental"},
+            "Amount": 300.0,
+            "Date": "2026-06-10",
+        }
+    ]
     balances = [{"LeaseId": 1, "PropertyId": 10, "UnitId": 100, "TotalBalance": 0.0}]
     client = _AnalyticsClient(
         rental_owners_api=_RentalOwnersApi(owners),

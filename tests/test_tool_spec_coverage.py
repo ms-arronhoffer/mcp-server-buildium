@@ -64,7 +64,11 @@ def registered_tool_names(server_module) -> list[str]:  # noqa: ANN001
         return [t.name for t in tools.values()]
     from mcp_server_buildium.tools import _common
 
-    return sorted(set(_common.TOOL_OPERATIONS) | set(_common.TOOL_METADATA) | {"health_check", "audit_summary"})
+    return sorted(
+        set(_common.TOOL_OPERATIONS)
+        | set(_common.TOOL_METADATA)
+        | {"health_check", "audit_summary"}
+    )
 
 
 def test_every_mapped_tool_targets_a_real_operation(
@@ -230,7 +234,9 @@ def _tool_request_models() -> dict[str, tuple[str, str]]:
                         model = imported_models[sub.func.id]
                 if model is not None:
                     if node.name in request_models:
-                        raise AssertionError(f"Duplicate tool request-model definition for {node.name}")
+                        raise AssertionError(
+                            f"Duplicate tool request-model definition for {node.name}"
+                        )
                     request_models[node.name] = model
                 self.generic_visit(node)
 

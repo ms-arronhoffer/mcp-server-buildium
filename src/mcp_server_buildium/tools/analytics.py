@@ -87,6 +87,7 @@ def _make_artifact(
 # Shared field helpers
 # ---------------------------------------------------------------------------
 
+
 def _bill_date(bill: dict[str, Any]) -> Any:
     for key in ("Date", "BillDate", "TransactionDate", "EntryDate"):
         if bill.get(key):
@@ -208,6 +209,7 @@ def _budget_gl_account_name(line: dict[str, Any]) -> str:
 # Tool registration
 # ---------------------------------------------------------------------------
 
+
 def register_analytics_tools(mcp: FastMCP, client: BuildiumClient) -> None:
     """Register the deep-analysis and opportunity-surfacing tools."""
 
@@ -280,7 +282,11 @@ def register_analytics_tools(mcp: FastMCP, client: BuildiumClient) -> None:
                         continue
                     entry = budget_by_acct.setdefault(
                         acct_id,
-                        {"account_id": acct_id, "account_name": _budget_gl_account_name(line), "budget": 0.0},
+                        {
+                            "account_id": acct_id,
+                            "account_name": _budget_gl_account_name(line),
+                            "budget": 0.0,
+                        },
                     )
                     entry["budget"] = round(entry["budget"] + _budget_annual_amount(line), m.CENTS)
 
@@ -345,7 +351,14 @@ def register_analytics_tools(mcp: FastMCP, client: BuildiumClient) -> None:
             if fmt:
                 columns = ["Account", "Budget", "Actual", "Variance", "Variance %", "Flagged"]
                 table = [
-                    [r["account_name"], r["budget"], r["actual"], r["variance"], r["variance_pct"], r["over_threshold"]]
+                    [
+                        r["account_name"],
+                        r["budget"],
+                        r["actual"],
+                        r["variance"],
+                        r["variance_pct"],
+                        r["over_threshold"],
+                    ]
                     for r in rows
                 ]
                 table.append(["TOTAL", total_budget, total_actual, total_variance, "", ""])
@@ -393,13 +406,19 @@ def register_analytics_tools(mcp: FastMCP, client: BuildiumClient) -> None:
                 kwargs: dict[str, Any] = {"limit": limit, "offset": offset}
                 if property_id is not None:
                     kwargs["propertyids"] = [property_id]
-                return client.rental_units_api.external_api_rental_units_get_all_rental_units(**kwargs)
+                return client.rental_units_api.external_api_rental_units_get_all_rental_units(
+                    **kwargs
+                )
 
             units = await c.paginate_all(_units_page)
 
             # Fetch active leases -> set of occupied unit ids.
             def _active_page(limit: int, offset: int) -> Any:
-                kwargs: dict[str, Any] = {"leasestatuses": ["Active"], "limit": limit, "offset": offset}
+                kwargs: dict[str, Any] = {
+                    "leasestatuses": ["Active"],
+                    "limit": limit,
+                    "offset": offset,
+                }
                 if property_id is not None:
                     kwargs["propertyids"] = [property_id]
                 return client.leases_api.external_api_leases_get_leases(**kwargs)
@@ -413,7 +432,11 @@ def register_analytics_tools(mcp: FastMCP, client: BuildiumClient) -> None:
 
             # Fetch past leases -> last rent per unit.
             def _past_page(limit: int, offset: int) -> Any:
-                kwargs: dict[str, Any] = {"leasestatuses": ["Past"], "limit": limit, "offset": offset}
+                kwargs: dict[str, Any] = {
+                    "leasestatuses": ["Past"],
+                    "limit": limit,
+                    "offset": offset,
+                }
                 if property_id is not None:
                     kwargs["propertyids"] = [property_id]
                 return client.leases_api.external_api_leases_get_leases(**kwargs)
@@ -435,7 +458,11 @@ def register_analytics_tools(mcp: FastMCP, client: BuildiumClient) -> None:
 
             # Fetch future leases -> next occupancy date per unit.
             def _future_page(limit: int, offset: int) -> Any:
-                kwargs: dict[str, Any] = {"leasestatuses": ["Future"], "limit": limit, "offset": offset}
+                kwargs: dict[str, Any] = {
+                    "leasestatuses": ["Future"],
+                    "limit": limit,
+                    "offset": offset,
+                }
                 if property_id is not None:
                     kwargs["propertyids"] = [property_id]
                 return client.leases_api.external_api_leases_get_leases(**kwargs)
@@ -448,7 +475,8 @@ def register_analytics_tools(mcp: FastMCP, client: BuildiumClient) -> None:
                     continue
                 start = m.parse_date(lease.get("LeaseFromDate") or lease.get("FromDate"))
                 if uid not in next_occupancy or (
-                    start is not None and (next_occupancy[uid] is None or start < next_occupancy[uid])
+                    start is not None
+                    and (next_occupancy[uid] is None or start < next_occupancy[uid])
                 ):
                     next_occupancy[uid] = start
 
@@ -487,8 +515,12 @@ def register_analytics_tools(mcp: FastMCP, client: BuildiumClient) -> None:
 
             total_units = len(units)
             vacant_count = len(vacant_rows)
-            occupancy_rate = round((total_units - vacant_count) / total_units * 100, 2) if total_units else 0.0
-            total_annualized_loss = round(sum(r["annualized_revenue_loss"] for r in vacant_rows), m.CENTS)
+            occupancy_rate = (
+                round((total_units - vacant_count) / total_units * 100, 2) if total_units else 0.0
+            )
+            total_annualized_loss = round(
+                sum(r["annualized_revenue_loss"] for r in vacant_rows), m.CENTS
+            )
 
             report: dict[str, Any] = {
                 "report": "vacancy_analysis",
@@ -569,7 +601,11 @@ def register_analytics_tools(mcp: FastMCP, client: BuildiumClient) -> None:
 
         async def _run() -> dict[str, Any]:
             def _active_page(limit: int, offset: int) -> Any:
-                kwargs: dict[str, Any] = {"leasestatuses": ["Active"], "limit": limit, "offset": offset}
+                kwargs: dict[str, Any] = {
+                    "leasestatuses": ["Active"],
+                    "limit": limit,
+                    "offset": offset,
+                }
                 if property_id is not None:
                     kwargs["propertyids"] = [property_id]
                 return client.leases_api.external_api_leases_get_leases(**kwargs)
@@ -838,7 +874,11 @@ def register_analytics_tools(mcp: FastMCP, client: BuildiumClient) -> None:
         async def _run() -> dict[str, Any]:
             # Active lease inflows (monthly rent).
             def _active_page(limit: int, offset: int) -> Any:
-                kwargs: dict[str, Any] = {"leasestatuses": ["Active"], "limit": limit, "offset": offset}
+                kwargs: dict[str, Any] = {
+                    "leasestatuses": ["Active"],
+                    "limit": limit,
+                    "offset": offset,
+                }
                 if property_id is not None:
                     kwargs["propertyids"] = [property_id]
                 return client.leases_api.external_api_leases_get_leases(**kwargs)
@@ -936,9 +976,23 @@ def register_analytics_tools(mcp: FastMCP, client: BuildiumClient) -> None:
                 "projections": projections,
             }
             if fmt:
-                columns = ["Horizon", "End Date", "Inflow", "Outflow", "Projected Balance", "Below Reserve"]
+                columns = [
+                    "Horizon",
+                    "End Date",
+                    "Inflow",
+                    "Outflow",
+                    "Projected Balance",
+                    "Below Reserve",
+                ]
                 table = [
-                    [p["horizon"], p["end_date"], p["projected_inflow"], p["projected_outflow"], p["projected_balance"], p["below_reserve"]]
+                    [
+                        p["horizon"],
+                        p["end_date"],
+                        p["projected_inflow"],
+                        p["projected_outflow"],
+                        p["projected_balance"],
+                        p["below_reserve"],
+                    ]
                     for p in projections
                 ]
                 report["export"] = _make_artifact(
@@ -990,7 +1044,11 @@ def register_analytics_tools(mcp: FastMCP, client: BuildiumClient) -> None:
         async def _run() -> dict[str, Any]:
             # Active lease rents by property for annual rent estimation.
             def _leases_page(limit: int, offset: int) -> Any:
-                kwargs: dict[str, Any] = {"leasestatuses": ["Active"], "limit": limit, "offset": offset}
+                kwargs: dict[str, Any] = {
+                    "leasestatuses": ["Active"],
+                    "limit": limit,
+                    "offset": offset,
+                }
                 if property_id is not None:
                     kwargs["propertyids"] = [property_id]
                 return client.leases_api.external_api_leases_get_leases(**kwargs)
@@ -1012,7 +1070,9 @@ def register_analytics_tools(mcp: FastMCP, client: BuildiumClient) -> None:
 
                 def _wo_page(limit: int, offset: int, _s: str = status) -> Any:
                     kwargs: dict[str, Any] = {"statuses": [_s], "limit": limit, "offset": offset}
-                    return client.work_orders_api.external_api_work_orders_get_all_work_orders(**kwargs)
+                    return client.work_orders_api.external_api_work_orders_get_all_work_orders(
+                        **kwargs
+                    )
 
                 wos = await c.paginate_all(_wo_page)
                 for wo in wos:
@@ -1166,14 +1226,20 @@ def register_analytics_tools(mcp: FastMCP, client: BuildiumClient) -> None:
                 kwargs: dict[str, Any] = {"limit": limit, "offset": offset}
                 if property_id is not None:
                     kwargs["propertyids"] = [property_id]
-                return client.rental_owners_api.external_api_rental_owners_get_rental_owners(**kwargs)
+                return client.rental_owners_api.external_api_rental_owners_get_rental_owners(
+                    **kwargs
+                )
 
             owners = await c.paginate_all(_owners_page)
             owner_by_id: dict[Any, dict[str, Any]] = {o.get("Id"): o for o in owners if o.get("Id")}
 
             # Active leases to identify which properties belong to which owner.
             def _leases_page(limit: int, offset: int) -> Any:
-                kwargs: dict[str, Any] = {"leasestatuses": ["Active"], "limit": limit, "offset": offset}
+                kwargs: dict[str, Any] = {
+                    "leasestatuses": ["Active"],
+                    "limit": limit,
+                    "offset": offset,
+                }
                 if property_id is not None:
                     kwargs["propertyids"] = [property_id]
                 return client.leases_api.external_api_leases_get_leases(**kwargs)
@@ -1198,7 +1264,9 @@ def register_analytics_tools(mcp: FastMCP, client: BuildiumClient) -> None:
                     txn_date = m.parse_date(txn.get("Date") or txn.get("TransactionDate"))
                     if txn_date is not None and (txn_date < from_date or txn_date > to_date):
                         continue
-                    ttype = str(txn.get("TransactionType") or txn.get("TransactionTypeEnum") or "").lower()
+                    ttype = str(
+                        txn.get("TransactionType") or txn.get("TransactionTypeEnum") or ""
+                    ).lower()
                     if any(w in ttype for w in ("payment", "electronic")):
                         amt = abs(m.to_float(txn.get("TotalAmount") or txn.get("Amount")))
                         income_by_prop[pid] = round(income_by_prop.get(pid, 0.0) + amt, m.CENTS)
@@ -1225,7 +1293,11 @@ def register_analytics_tools(mcp: FastMCP, client: BuildiumClient) -> None:
 
             # Outstanding balances (receivables remaining).
             def _bal_page(limit: int, offset: int) -> Any:
-                kwargs: dict[str, Any] = {"leasestatuses": ["Active"], "limit": limit, "offset": offset}
+                kwargs: dict[str, Any] = {
+                    "leasestatuses": ["Active"],
+                    "limit": limit,
+                    "offset": offset,
+                }
                 return client.lease_transactions_api.external_api_lease_outstanding_balances_get_lease_outstanding_balances(
                     **kwargs
                 )
@@ -1302,7 +1374,9 @@ def register_analytics_tools(mcp: FastMCP, client: BuildiumClient) -> None:
                     ]
                     for r in prop_rows
                 ]
-                table.append(["TOTAL", total_income, total_expenses, total_net, total_receivables, ""])
+                table.append(
+                    ["TOTAL", total_income, total_expenses, total_net, total_receivables, ""]
+                )
                 sections = [
                     Section(
                         heading=f"Period: {from_date.isoformat()} to {to_date.isoformat()}",
@@ -1359,7 +1433,11 @@ def register_analytics_tools(mcp: FastMCP, client: BuildiumClient) -> None:
 
         async def _run() -> dict[str, Any]:
             def _bal_page(limit: int, offset: int) -> Any:
-                kwargs: dict[str, Any] = {"leasestatuses": ["Active"], "limit": limit, "offset": offset}
+                kwargs: dict[str, Any] = {
+                    "leasestatuses": ["Active"],
+                    "limit": limit,
+                    "offset": offset,
+                }
                 return client.lease_transactions_api.external_api_lease_outstanding_balances_get_lease_outstanding_balances(
                     **kwargs
                 )
@@ -1391,9 +1469,15 @@ def register_analytics_tools(mcp: FastMCP, client: BuildiumClient) -> None:
                 ledger = await c.paginate_all(_ledger_page)
                 payments_total = 0.0
                 for txn in ledger:
-                    ttype = str(txn.get("TransactionType") or txn.get("TransactionTypeEnum") or "").lower()
-                    if any(w in ttype for w in ("payment", "credit", "refund applied", "electronic")):
-                        payments_total += abs(m.to_float(txn.get("TotalAmount") or txn.get("Amount")))
+                    ttype = str(
+                        txn.get("TransactionType") or txn.get("TransactionTypeEnum") or ""
+                    ).lower()
+                    if any(
+                        w in ttype for w in ("payment", "credit", "refund applied", "electronic")
+                    ):
+                        payments_total += abs(
+                            m.to_float(txn.get("TotalAmount") or txn.get("Amount"))
+                        )
                 payments_total = round(payments_total, m.CENTS)
 
                 # Age at three time points.
@@ -1504,6 +1588,7 @@ def register_analytics_tools(mcp: FastMCP, client: BuildiumClient) -> None:
 # ---------------------------------------------------------------------------
 # Private helpers shared by vacancy_analysis and rent_trend_report
 # ---------------------------------------------------------------------------
+
 
 def _lease_rent(lease: dict[str, Any]) -> float:
     details = lease.get("AccountDetails") or {}
