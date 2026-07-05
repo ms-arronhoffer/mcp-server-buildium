@@ -78,8 +78,6 @@ def test_management_valid_config() -> None:
     assert cfg.get_graph_tenant_id() == "tenant"
     assert cfg.get_entra_app_role_id_map()["admin"].startswith("1111")
     assert cfg.get_app_role_id_to_role()["11111111-1111-1111-1111-111111111111"] == "admin"
-    assert cfg.get_entra_app_role_id_map()["admin"].startswith("1111")
-    assert cfg.get_app_role_id_to_role()["11111111-1111-1111-1111-111111111111"] == "admin"
 
 
 def test_app_role_id_map_rejects_unknown_role() -> None:
