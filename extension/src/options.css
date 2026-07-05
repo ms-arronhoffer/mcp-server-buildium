@@ -100,3 +100,33 @@ input.prefilled {
   background: #f1f8ff;
   border-color: #a9c9f5;
 }
+
+/* Admin panel: users table and action controls. */
+#admin-panel {
+  margin-top: 24px;
+  border-top: 2px solid #e0e0e0;
+  padding-top: 16px;
+}
+
+#users-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 12px;
+  font-size: 14px;
+}
+
+#users-table th,
+#users-table td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid #eee;
+  vertical-align: middle;
+}
+
+#users-table select {
+  margin-right: 6px;
+}
+
+#download-buttons {
+  gap: 8px;
+}

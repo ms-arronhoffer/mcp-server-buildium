@@ -105,6 +105,54 @@
         </div>
         <ul id="errors" class="errors"></ul>
       </form>
+
+      <section id="admin-panel" hidden>
+        <h2>Administration</h2>
+        <p class="hint">
+          You are signed in as an administrator. Invite users into Microsoft
+          Entra with a role, change existing users' roles, and download a
+          preconfigured copy of this extension to share with your team.
+        </p>
+
+        <fieldset>
+          <legend>Invite a user</legend>
+          <label for="invite-email">Email address</label>
+          <input id="invite-email" type="email" placeholder="person@example.com" />
+
+          <label for="invite-role">Role</label>
+          <select id="invite-role"></select>
+
+          <div class="row">
+            <button type="button" id="invite-button">Send invitation</button>
+            <span id="admin-status" class="status" aria-live="polite"></span>
+          </div>
+          <ul id="admin-errors" class="errors"></ul>
+        </fieldset>
+
+        <fieldset>
+          <legend>Users</legend>
+          <button type="button" id="refresh-users">Refresh</button>
+          <table id="users-table">
+            <thead>
+              <tr>
+                <th scope="col">User</th>
+                <th scope="col">Role</th>
+                <th scope="col">Change</th>
+              </tr>
+            </thead>
+            <tbody id="users-body"></tbody>
+          </table>
+        </fieldset>
+
+        <fieldset id="download-extension" hidden>
+          <legend>Distribute the extension</legend>
+          <p class="hint">
+            Download a prebuilt, preconfigured build to hand to users so they do
+            not have to enter any settings.
+          </p>
+          <div class="row" id="download-buttons"></div>
+        </fieldset>
+      </section>
     </main>
     <script type="module" src="options.js"></script>
   </body>

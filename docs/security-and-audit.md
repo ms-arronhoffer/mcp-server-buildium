@@ -94,6 +94,61 @@ Per-user scoping is enforced at both surfaces, for visibility and hard denial:
 | MCP `tools/list` / `tools/call` | Filtered by middleware | Rejected with a tool error |
 | `/chat` (server-side LLM) | Offered tool specs filtered | Tool runner refuses forbidden tools |
 
+## Admin management routes (`/manage/*`)
+
+An optional, **admin-only** capability lets an administrator manage users and
+distribute the browser extension. It is disabled by default and turned on with
+`BUILDIUM_MANAGEMENT_ENABLED=true`.
+
+The routes are HTTP custom routes served next to `/mcp` and `/chat`, gated by the
+**same** Entra JWT auth. A caller must additionally resolve to the coarse
+`admin` role — the *same* admin notion that governs admin-only tools like
+`audit_summary` (see [Per-user scoping](#per-user-scoping-with-entra-app-roles)).
+Non-admin callers receive `403`; unauthenticated callers receive `401`.
+
+| Route | Method | Purpose |
+| --- | --- | --- |
+| `/manage/capabilities` | GET | Report whether management is enabled and whether the caller is an admin (lets the extension show/hide its admin panel). |
+| `/manage/users` | GET | List users assigned to the API app and their coarse roles. |
+| `/manage/users` | POST | Invite an Entra **B2B guest** (`{email, role}`) and assign the role. |
+| `/manage/users/{id}/role` | PATCH | Change a user's role (`{role}`). |
+| `/manage/extension?browser=chrome\|firefox` | GET | Download the prebuilt, preconfigured extension archive. |
+
+Management actions are recorded in the audit trail (`manage_invite_user`,
+`manage_edit_role`, `manage_list_users`, `manage_download_extension`).
+
+### Microsoft Graph setup
+
+User invitations and role assignments are performed server-side via Microsoft
+Graph using the **client-credentials** (app-only) grant. Register a dedicated
+Entra app and grant it the **admin-consented application permissions**
+`User.Invite.All`, `AppRoleAssignment.ReadWrite.All`, and `Application.Read.All`.
+Its credentials stay server-side and are never returned by any endpoint:
+
+- `BUILDIUM_GRAPH_CLIENT_ID`, `BUILDIUM_GRAPH_CLIENT_SECRET`
+- `BUILDIUM_GRAPH_TENANT_ID` (defaults to `BUILDIUM_ENTRA_TENANT_ID`)
+- `BUILDIUM_ENTRA_API_SERVICE_PRINCIPAL_ID` — object ID of the API app's
+  service principal (enterprise application); app-role assignments are created
+  on it.
+- `BUILDIUM_ENTRA_APP_ROLE_ID_MAP` — JSON mapping `admin`/`operator`/`readonly`
+  to the API app's Entra **App Role IDs**, e.g.
+  `{"admin":"<guid>","operator":"<guid>","readonly":"<guid>"}`. Keep these
+  consistent with `BUILDIUM_ENTRA_ROLE_POLICY_MAP` so the same role vocabulary
+  flows end to end.
+
+### Preconfigured extension download
+
+`GET /manage/extension` serves a **prebuilt** archive whose configuration is
+already baked in — no packaging happens in the request path. Produce the archive
+at release time by running the extension build with your deployment's public
+defaults (see `extension/README.md`), then zip `dist/chrome` to a `.zip` and
+`dist/firefox` to a `.xpi` and point the server at them:
+
+- `BUILDIUM_MANAGEMENT_EXTENSION_CHROME_PATH`
+- `BUILDIUM_MANAGEMENT_EXTENSION_FIREFOX_PATH`
+
+If the requested browser's archive is not configured, the route returns `503`.
+
 ## Audit trail
 
 Every invocation — plus every policy denial and rate-limit rejection — emits a
