@@ -3,6 +3,12 @@
 Served at ``GET /manage/`` when management is enabled. The page authenticates
 against the ``/manage/llm`` REST endpoints using a ****** that the admin
 provides in the UI. No external CDN resources are used.
+
+The page is served with a strict, nonce-based Content-Security-Policy (see
+``management_endpoint.manage_admin_ui``). To stay compatible with that policy
+the markup contains **no** inline event handlers (``onclick=``) and **no**
+inline ``style=`` attributes; the single ``<style>`` and ``<script>`` blocks
+carry a per-request nonce injected via the ``__CSP_NONCE__`` placeholder.
 """
 
 from __future__ import annotations
@@ -14,7 +20,7 @@ _ADMIN_HTML = """\
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Buildium AI Configuration</title>
-<style>
+<style nonce="__CSP_NONCE__">
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
   font-size:14px;color:#1a1a2e;background:#f0f2f5;min-height:100vh}
@@ -67,6 +73,11 @@ button{padding:8px 16px;border:none;border-radius:6px;font-size:.875rem;
 #token-section input{font-family:monospace}
 #global-status{margin-bottom:10px}
 .hint{font-size:.78rem;color:#6b7280;margin-top:3px}
+.hidden{display:none}
+.mt0{margin-top:0}
+.mt10{margin-top:10px}
+.mb12{margin-bottom:12px}
+.muted{color:#6b7280}
 </style>
 </head>
 <body>
@@ -80,12 +91,12 @@ button{padding:8px 16px;border:none;border-radius:6px;font-size:.875rem;
     <input type="password" id="bearer-token" placeholder="Paste your Entra access token here"/>
     <p class="hint">Sign in via the browser extension and copy the token from the extension settings, or use your Entra access token.</p>
     <div class="row">
-      <button class="btn-primary" onclick="loadConfig()">Load configuration</button>
+      <button class="btn-primary" id="btn-load">Load configuration</button>
     </div>
     <div id="auth-status" class="status"></div>
   </div>
 
-  <div id="config-area" style="display:none">
+  <div id="config-area" class="hidden">
     <div id="global-status" class="status"></div>
 
     <!-- Providers -->
@@ -97,7 +108,7 @@ button{padding:8px 16px;border:none;border-radius:6px;font-size:.875rem;
     <!-- Tiers -->
     <div class="card">
       <h2>Model Tiers</h2>
-      <p class="hint" style="margin-bottom:12px">
+      <p class="hint mb12">
         Assign a provider and model to each tier. The router classifies each
         request and selects the configured tier automatically.
       </p>
@@ -116,14 +127,14 @@ button{padding:8px 16px;border:none;border-radius:6px;font-size:.875rem;
     </div>
 
     <div class="row">
-      <button class="btn-primary" onclick="saveConfig()">Save all changes</button>
-      <button class="btn-secondary" onclick="loadConfig()">Reload from server</button>
+      <button class="btn-primary" id="btn-save">Save all changes</button>
+      <button class="btn-secondary" id="btn-reload">Reload from server</button>
     </div>
-    <div id="save-status" class="status" style="margin-top:10px"></div>
+    <div id="save-status" class="status mt10"></div>
   </div>
 </div>
 
-<script>
+<script nonce="__CSP_NONCE__">
 const TIER_META = {
   simple:   {label:"Simple",   desc:"Short queries, drafting, conversational"},
   thinking: {label:"Thinking", desc:"Analysis, compliance, financial reasoning"},
@@ -182,11 +193,11 @@ async function loadConfig(){
   try{
     _cfg = await apiFetch("GET","llm");
     renderConfig(_cfg);
-    document.getElementById("config-area").style.display = "";
+    document.getElementById("config-area").classList.remove("hidden");
     setStatus("auth-status","Connected \u2713",true);
   }catch(e){
     setStatus("auth-status",e.message,false);
-    document.getElementById("config-area").style.display = "none";
+    document.getElementById("config-area").classList.add("hidden");
   }
 }
 
@@ -222,8 +233,8 @@ function renderProviders(providers){
         </div>
       </div>
       <div class="row">
-        <button class="btn-secondary btn-sm" onclick="testProvider('${p}')">Test connection</button>
-        <span id="test-status-${p}" class="status btn-sm" style="margin-top:0"></span>
+        <button class="btn-secondary btn-sm" data-action="test" data-provider="${p}">Test connection</button>
+        <span id="test-status-${p}" class="status btn-sm mt0"></span>
       </div>`;
     area.appendChild(block);
   }
@@ -256,7 +267,7 @@ function renderTiers(tiers){
           placeholder="e.g. gpt-4o-mini"/>
       </div>
       <div>
-        <button class="btn-secondary btn-sm" onclick="saveTier('${t}')">Save</button>
+        <button class="btn-secondary btn-sm" data-action="save-tier" data-tier="${t}">Save</button>
       </div>`;
     area.appendChild(row);
   }
@@ -274,7 +285,7 @@ function renderRouting(tiers){
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td><strong>${meta.label}</strong></td>
-      <td style="color:#6b7280">${meta.desc}</td>
+      <td class="muted">${meta.desc}</td>
       <td>${PROVIDER_LABELS[td.provider] || "\u2014"}</td>
       <td><code>${td.model || "\u2014"}</code></td>
       <td>${badge}</td>`;
@@ -334,12 +345,36 @@ async function saveConfig(){
     setStatus("save-status",e.message,false);
   }
 }
+
+document.addEventListener("DOMContentLoaded", function(){
+  document.getElementById("btn-load").addEventListener("click", loadConfig);
+  document.getElementById("btn-save").addEventListener("click", saveConfig);
+  document.getElementById("btn-reload").addEventListener("click", loadConfig);
+  // Event delegation for dynamically-rendered buttons keeps the markup free of
+  // inline handlers, so the page stays compatible with the strict nonce CSP.
+  document.addEventListener("click", function(ev){
+    const el = ev.target.closest("[data-action]");
+    if(!el) return;
+    const action = el.getAttribute("data-action");
+    if(action === "test"){
+      testProvider(el.getAttribute("data-provider"));
+    }else if(action === "save-tier"){
+      saveTier(el.getAttribute("data-tier"));
+    }
+  });
+});
 </script>
 </body>
 </html>
 """
 
 
-def get_admin_html() -> str:
-    """Return the self-contained admin UI HTML page."""
-    return _ADMIN_HTML
+def get_admin_html(nonce: str = "") -> str:
+    """Return the self-contained admin UI HTML page.
+
+    *nonce* is substituted into the ``<style>`` and ``<script>`` tags so the
+    page can be served under a strict nonce-based Content-Security-Policy. When
+    empty, the placeholder is simply removed (the resulting page then needs a
+    permissive CSP to run).
+    """
+    return _ADMIN_HTML.replace("__CSP_NONCE__", nonce)

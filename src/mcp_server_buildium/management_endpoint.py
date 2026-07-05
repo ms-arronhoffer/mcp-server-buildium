@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import os
 import re
+import secrets
 from typing import TYPE_CHECKING, Any
 
 from starlette.requests import Request
@@ -173,7 +174,27 @@ def register_management_routes(
             )
         from .llm.admin_page import get_admin_html
 
-        return HTMLResponse(get_admin_html())
+        # The page uses an inline <style> and <script>. The global security
+        # middleware sets a strict "default-src 'none'" CSP that would block
+        # them, so serve this page with a per-request nonce-based policy that
+        # allows only its own inline blocks (and same-origin fetch calls back to
+        # the /manage/* API). setdefault() in the middleware leaves this header
+        # untouched.
+        nonce = secrets.token_urlsafe(16)
+        csp = (
+            "default-src 'none'; "
+            f"style-src 'nonce-{nonce}'; "
+            f"script-src 'nonce-{nonce}'; "
+            "connect-src 'self'; "
+            "img-src 'self' data:; "
+            "base-uri 'none'; "
+            "form-action 'none'; "
+            "frame-ancestors 'none'"
+        )
+        return HTMLResponse(
+            get_admin_html(nonce),
+            headers={"Content-Security-Policy": csp},
+        )
 
     @mcp.custom_route(MANAGE_CAPABILITIES_PATH, methods=["GET"])
     async def manage_capabilities(request: Request) -> JSONResponse:

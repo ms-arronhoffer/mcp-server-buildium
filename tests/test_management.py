@@ -706,3 +706,43 @@ def test_llm_test_uses_stored_key_when_no_key_provided(
     # Should succeed using the stored key, not fail with "no key provided".
     assert resp.status_code == 200
     assert called_with.get("api_key") == "sk-stored"
+
+
+# --- admin UI page (Content-Security-Policy) -------------------------------
+def test_admin_ui_served_with_nonce_csp(manage_client) -> None:
+    """The /manage page must ship a nonce-based CSP that allows its own inline
+    <style>/<script> so the LLM configuration UI actually runs in the browser."""
+    resp = manage_client.get("/manage")
+    assert resp.status_code == 200
+
+    csp = resp.headers.get("content-security-policy")
+    assert csp is not None
+    # The global "default-src 'none'" (set by the security middleware) alone
+    # would block the page; this route must supply script/style nonces.
+    assert "script-src 'nonce-" in csp
+    assert "style-src 'nonce-" in csp
+    assert "connect-src 'self'" in csp
+
+    # The nonce in the header must match the one on the inline tags.
+    import re as _re
+
+    match = _re.search(r"script-src 'nonce-([^']+)'", csp)
+    assert match is not None, csp
+    nonce = match.group(1)
+    body = resp.text
+    assert f'<style nonce="{nonce}">' in body
+    assert f'<script nonce="{nonce}">' in body
+
+
+def test_admin_ui_has_no_inline_handlers_or_styles(manage_client) -> None:
+    """CSP with nonces (no 'unsafe-inline') blocks inline event handlers and
+    inline style attributes, so the markup must not contain any."""
+    body = manage_client.get("/manage").text
+    assert "onclick=" not in body
+    assert "style=" not in body
+
+
+def test_admin_ui_nonce_is_per_request(manage_client) -> None:
+    first = manage_client.get("/manage").headers["content-security-policy"]
+    second = manage_client.get("/manage").headers["content-security-policy"]
+    assert first != second

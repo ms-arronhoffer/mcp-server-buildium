@@ -241,6 +241,29 @@ def test_store_atomic_save_no_partial_reads(tmp_path):
     assert not os.path.exists(tmp), "tmp file left after save"
 
 
+def test_store_save_unwritable_path_raises_actionable_error(tmp_path):
+    """A non-writable config path must surface a clear, actionable message
+    (mentioning BUILDIUM_LLM_CONFIG_PATH) rather than a bare errno, and must
+    not leave a stray .tmp file behind."""
+    ro_dir = tmp_path / "readonly"
+    ro_dir.mkdir()
+    path = str(ro_dir / "llm_config.json")
+    store = _make_store(path)
+    os.chmod(ro_dir, 0o500)  # read + execute, no write
+    try:
+        with pytest.raises(RuntimeError) as exc:
+            asyncio.run(store.save(_simple_config()))
+    finally:
+        os.chmod(ro_dir, 0o700)
+    msg = str(exc.value)
+    assert "BUILDIUM_LLM_CONFIG_PATH" in msg
+    assert path in msg
+    # The underlying OS error detail must be preserved for troubleshooting.
+    assert "Permission denied" in msg
+    assert not os.path.exists(path + ".tmp")
+
+
+
 # ---------------------------------------------------------------------------
 # update_tier
 # ---------------------------------------------------------------------------
