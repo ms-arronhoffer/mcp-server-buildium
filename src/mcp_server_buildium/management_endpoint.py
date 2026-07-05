@@ -199,6 +199,7 @@ def register_management_routes(
                 "roles": sorted(ENTRA_MAPPABLE_ROLES),
                 "extensionBrowsers": available,
                 "llmConfigured": llm_configured,
+                "userManagementConfigured": config.graph_management_configured(),
             }
         )
 

@@ -56,9 +56,13 @@ def test_is_admin_falls_back_to_server_role_without_map() -> None:
 
 
 # --- config validation -----------------------------------------------------
-def test_management_requires_graph_config() -> None:
-    with pytest.raises(ValueError, match="GRAPH_CLIENT_ID"):
-        _cfg(management_enabled=True, entra_app_role_id_map=ROLE_ID_MAP)
+def test_management_enabled_without_graph_warns_but_starts() -> None:
+    # Enabling management without full Graph config must NOT crash startup:
+    # the admin UI + LLM-config routes still work; only user-management is off.
+    with pytest.warns(UserWarning, match="user-management"):
+        cfg = _cfg(management_enabled=True, entra_app_role_id_map=ROLE_ID_MAP)
+    assert cfg.management_active() is True
+    assert cfg.graph_management_configured() is False
 
 
 def test_management_valid_config() -> None:
@@ -70,7 +74,10 @@ def test_management_valid_config() -> None:
         entra_app_role_id_map=ROLE_ID_MAP,
     )
     assert cfg.management_active() is True
+    assert cfg.graph_management_configured() is True
     assert cfg.get_graph_tenant_id() == "tenant"
+    assert cfg.get_entra_app_role_id_map()["admin"].startswith("1111")
+    assert cfg.get_app_role_id_to_role()["11111111-1111-1111-1111-111111111111"] == "admin"
     assert cfg.get_entra_app_role_id_map()["admin"].startswith("1111")
     assert cfg.get_app_role_id_to_role()["11111111-1111-1111-1111-111111111111"] == "admin"
 

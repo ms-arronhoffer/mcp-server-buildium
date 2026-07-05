@@ -100,6 +100,15 @@ An optional, **admin-only** capability lets an administrator manage users and
 distribute the browser extension. It is disabled by default and turned on with
 `BUILDIUM_MANAGEMENT_ENABLED=true`.
 
+Enabling it makes the self-contained admin UI (`GET /manage/`) and the
+LLM-configuration routes available immediately — these need no Microsoft Graph
+settings. The **user-management** routes (invite/list/change role) additionally
+require the [Microsoft Graph setup](#microsoft-graph-setup) below; when those
+settings are missing the server still starts (the admin UI stays reachable) and
+only the user-management routes are disabled, returning `502`. Check
+`GET /manage/capabilities` (`userManagementConfigured`) to see whether they are
+available.
+
 The routes are HTTP custom routes served next to `/mcp` and `/chat`, gated by the
 **same** Entra JWT auth. A caller must additionally resolve to the coarse
 `admin` role — the *same* admin notion that governs admin-only tools like

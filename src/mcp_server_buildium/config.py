@@ -184,10 +184,12 @@ class BuildiumConfig(BaseSettings):
     management_enabled: bool = Field(
         default=False,
         description=(
-            "Enable the admin-only management routes (/manage/*): invite Entra B2B "
-            "guests with a role, edit user roles, and download a preconfigured "
-            "extension. Off by default. Requires the Microsoft Graph settings below "
-            "and (for role gating) BUILDIUM_ENTRA_ROLE_POLICY_MAP."
+            "Enable the admin-only management routes (/manage/*): the self-contained "
+            "admin UI and LLM-configuration routes. Off by default. The user-management "
+            "features (invite Entra B2B guests, edit roles) additionally need the "
+            "Microsoft Graph settings below and BUILDIUM_ENTRA_ROLE_POLICY_MAP; when "
+            "those are missing the server still starts and only those routes are "
+            "disabled (HTTP 502)."
         ),
     )
     graph_tenant_id: str | None = Field(
@@ -640,40 +642,58 @@ class BuildiumConfig(BaseSettings):
     def _validate_management(self) -> None:
         """Validate the optional admin management configuration.
 
-        When BUILDIUM_MANAGEMENT_ENABLED=true, the Microsoft Graph app-only
-        credentials, the API app's service-principal object ID, and the
-        role→App-Role-ID map must all be present so the management routes can
-        invite guests and assign roles. The role gate additionally relies on
-        BUILDIUM_ENTRA_ROLE_POLICY_MAP being configured (validated separately).
+        Enabling BUILDIUM_MANAGEMENT_ENABLED=true only turns on the ``/manage/*``
+        routes; the self-contained admin UI and the LLM-configuration routes work
+        without any Microsoft Graph settings. The Graph app-only credentials, the
+        API app's service-principal object ID, and the role→App-Role-ID map are
+        needed only for the *user-management* routes (inviting B2B guests and
+        assigning roles). When those are incomplete we warn instead of raising so
+        the server still starts and the admin UI stays reachable — the
+        user-management routes then degrade gracefully at runtime (HTTP 502).
+
+        Malformed values (e.g. an invalid BUILDIUM_ENTRA_APP_ROLE_ID_MAP JSON)
+        still fail fast, whether or not management is enabled.
         """
+        # Always validate the shape of the role-ID map so a typo fails fast.
+        role_ids = self._parse_app_role_id_map()
         if not self.management_enabled:
-            # Still validate the role-ID map shape if provided, to fail fast.
-            self._parse_app_role_id_map()
             return
+        missing = self._missing_graph_management_settings(role_ids)
+        if missing:
+            warnings.warn(
+                "BUILDIUM_MANAGEMENT_ENABLED=true but the following settings are "
+                f"missing: {', '.join(missing)}. The admin UI (GET /manage/) and "
+                "LLM-configuration routes are available, but user-management "
+                "routes (invite/list/change role) will return HTTP 502 until "
+                "these are configured.",
+                UserWarning,
+                stacklevel=4,
+            )
+
+    def _missing_graph_management_settings(
+        self, role_ids: dict[str, str] | None = None
+    ) -> list[str]:
+        """Return the env-var names required for Graph-backed user management.
+
+        Returns an empty list when every setting the user-management routes need
+        is present.
+        """
+        if role_ids is None:
+            role_ids = self._parse_app_role_id_map()
+        missing: list[str] = []
         if not (self.get_graph_tenant_id() or "").strip():
-            raise ValueError(
-                "BUILDIUM_MANAGEMENT_ENABLED=true requires a Graph tenant "
-                "(set BUILDIUM_GRAPH_TENANT_ID or BUILDIUM_ENTRA_TENANT_ID)"
-            )
+            missing.append("BUILDIUM_GRAPH_TENANT_ID (or BUILDIUM_ENTRA_TENANT_ID)")
         if not (self.graph_client_id and self.graph_client_id.strip()):
-            raise ValueError("BUILDIUM_MANAGEMENT_ENABLED=true requires BUILDIUM_GRAPH_CLIENT_ID")
+            missing.append("BUILDIUM_GRAPH_CLIENT_ID")
         if not (self.graph_client_secret and self.graph_client_secret.strip()):
-            raise ValueError(
-                "BUILDIUM_MANAGEMENT_ENABLED=true requires BUILDIUM_GRAPH_CLIENT_SECRET"
-            )
+            missing.append("BUILDIUM_GRAPH_CLIENT_SECRET")
         if not (
             self.entra_api_service_principal_id and self.entra_api_service_principal_id.strip()
         ):
-            raise ValueError(
-                "BUILDIUM_MANAGEMENT_ENABLED=true requires BUILDIUM_ENTRA_API_SERVICE_PRINCIPAL_ID"
-            )
-        role_ids = self._parse_app_role_id_map()
+            missing.append("BUILDIUM_ENTRA_API_SERVICE_PRINCIPAL_ID")
         if not role_ids:
-            raise ValueError(
-                "BUILDIUM_MANAGEMENT_ENABLED=true requires "
-                "BUILDIUM_ENTRA_APP_ROLE_ID_MAP (a JSON object mapping "
-                "'admin'/'operator'/'readonly' to Entra App Role IDs)"
-            )
+            missing.append("BUILDIUM_ENTRA_APP_ROLE_ID_MAP")
+        return missing
 
     def _parse_app_role_id_map(self) -> dict[str, str]:
         """Parse and validate BUILDIUM_ENTRA_APP_ROLE_ID_MAP.
@@ -826,6 +846,15 @@ class BuildiumConfig(BaseSettings):
     def management_active(self) -> bool:
         """Return True when the admin management routes are enabled."""
         return bool(self.management_enabled)
+
+    def graph_management_configured(self) -> bool:
+        """Return True when Graph-backed user-management is fully configured.
+
+        The admin UI and LLM-configuration routes work with just
+        ``management_active()``; the invite/list/change-role routes additionally
+        require the Microsoft Graph settings reported here.
+        """
+        return self.management_active() and not self._missing_graph_management_settings()
 
     def get_graph_tenant_id(self) -> str | None:
         """Return the tenant used for Microsoft Graph app-only tokens.
