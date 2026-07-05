@@ -258,6 +258,8 @@ def test_store_save_unwritable_path_raises_actionable_error(tmp_path):
     msg = str(exc.value)
     assert "BUILDIUM_LLM_CONFIG_PATH" in msg
     assert path in msg
+    # The underlying OS error detail must be preserved for troubleshooting.
+    assert "Permission denied" in msg
     assert not os.path.exists(path + ".tmp")
 
 

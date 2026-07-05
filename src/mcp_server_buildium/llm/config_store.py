@@ -358,7 +358,8 @@ class LLMConfigStore:
             with contextlib.suppress(OSError):
                 os.unlink(tmp)
             raise RuntimeError(
-                f"Could not write the LLM config file at '{self._path}': {exc.strerror or exc}. "
+                f"Could not write the LLM config file at '{self._path}': "
+                f"{exc.strerror if exc.strerror else exc}. "
                 "Set BUILDIUM_LLM_CONFIG_PATH to a writable file path (e.g. on a "
                 "mounted, writable volume) and ensure the server process can write to it."
             ) from exc

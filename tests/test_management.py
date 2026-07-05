@@ -726,7 +726,9 @@ def test_admin_ui_served_with_nonce_csp(manage_client) -> None:
     # The nonce in the header must match the one on the inline tags.
     import re as _re
 
-    nonce = _re.search(r"script-src 'nonce-([^']+)'", csp).group(1)
+    match = _re.search(r"script-src 'nonce-([^']+)'", csp)
+    assert match is not None, csp
+    nonce = match.group(1)
     body = resp.text
     assert f'<style nonce="{nonce}">' in body
     assert f'<script nonce="{nonce}">' in body
