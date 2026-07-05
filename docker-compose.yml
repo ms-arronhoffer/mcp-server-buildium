@@ -105,6 +105,19 @@ services:
       # without an Entra tenant/token. Defaults to false so that a configured
       # Entra tenant/audience in .env actually takes effect. NON-PRODUCTION ONLY.
       BUILDIUM_DEV_AUTH_BYPASS: "${BUILDIUM_DEV_AUTH_BYPASS:-false}"
+      # Persist the admin-UI LLM config store on the named volume below so
+      # providers/models/keys configured via /manage/ survive container
+      # recreation. Override in .env if you want a different location.
+      BUILDIUM_LLM_CONFIG_PATH: "${BUILDIUM_LLM_CONFIG_PATH:-/app/data/llm_config.json}"
       # The server-side LLM assistant (BUILDIUM_LLM_PROVIDER / _MODEL /
       # _*_API_KEY) and Entra auth (BUILDIUM_ENTRA_*) are supplied via the .env
       # file above; keys are read here and never sent to the browser extension.
+    volumes:
+      # Persistent state for the HTTP server: the admin-UI LLM config store
+      # (llm_config.json) and, if enabled, the file audit sink. Keeps
+      # web-configured providers/models/keys across `docker compose up`
+      # rebuilds and container recreation.
+      - buildium-data:/app/data
+
+volumes:
+  buildium-data:
