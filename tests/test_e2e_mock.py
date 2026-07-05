@@ -400,3 +400,19 @@ def test_readonly_policy_blocks_mutations_e2e(mock_server, event_loop):
     assert "create_lease" not in tool_map
     assert "update_rental" not in tool_map
     assert "create_bill" not in tool_map
+
+
+def test_portfolio_alerts_late_rent_e2e(tools, run):
+    """The proactive portfolio-alerts late-rent rule must resolve end-to-end.
+
+    Regression for the "technical hiccup when pulling the automated portfolio
+    alerts" error: the rule reads ``GET /v1/leases/outstandingbalances``, which
+    the mock now implements and seeds, so the tool returns a real digest instead
+    of a Buildium API error envelope.
+    """
+    result = _ok(run(tools["portfolio_alerts"].fn()))
+    data = result["data"]
+    late = [a for a in data["alerts"] if a["rule"] == "late_rent"]
+    assert late, "expected at least one late-rent alert from seeded outstanding balances"
+    assert data["digest"]
+    assert all(a["details"]["balance"] > 0 for a in late)

@@ -81,7 +81,10 @@ export function parseInline(text) {
 
   const rules = [
     {
-      re: /^\[([^\]]+)\]\(([^)]+)\)/,
+      // The target allows one level of balanced parentheses so natural-language
+      // action prompts like `action:Show details for lease 1 (Unit 101)` are
+      // captured whole instead of being truncated at the first `)`.
+      re: /^\[([^\]]+)\]\(((?:[^()]|\([^()]*\))*)\)/,
       make: (m) => {
         const href = m[2].trim();
         if (href.toLowerCase().startsWith(ACTION_SCHEME)) {
