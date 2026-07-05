@@ -28,6 +28,7 @@ from ..buildium_client import BuildiumClient
 from ..llm.artifacts import (
     SUPPORTED_FORMATS,
     ArtifactError,
+    Chart,
     Section,
     Slide,
     add_current_artifact,
@@ -185,6 +186,45 @@ def _coerce_sections(raw: Any) -> list[Section]:
     return out
 
 
+def _coerce_chart(raw: Any) -> Chart | None:
+    """Coerce a caller-supplied ``chart`` mapping into a :class:`Chart`."""
+    if not isinstance(raw, dict):
+        return None
+    categories = [str(c) for c in (raw.get("categories") or raw.get("labels") or [])]
+
+    def _floats(values: Any) -> list[float]:
+        out: list[float] = []
+        for v in values or []:
+            try:
+                out.append(float(str(v).replace(",", "").replace("$", "").replace("%", "")))
+            except (TypeError, ValueError):
+                out.append(0.0)
+        return out
+
+    series: list[tuple[str, list[float]]] = []
+    raw_series = raw.get("series")
+    if isinstance(raw_series, list):
+        for item in raw_series:
+            if isinstance(item, dict):
+                name = str(item.get("name") or item.get("label") or "")
+                values = _floats(item.get("values") or item.get("data") or [])
+                if values:
+                    series.append((name, values))
+            elif isinstance(item, (list, tuple)):
+                series.append(("", _floats(item)))
+    # Accept a simple {"values": [...]} single-series shorthand too.
+    if not series and raw.get("values"):
+        series.append((str(raw.get("name") or ""), _floats(raw.get("values"))))
+    if not series:
+        return None
+    return Chart(
+        categories=categories,
+        series=series,
+        kind=str(raw.get("kind") or raw.get("type") or "column"),
+        title=str(raw.get("title") or ""),
+    )
+
+
 def _coerce_slides(raw: Any) -> list[Slide]:
     """Coerce a caller-supplied ``slides`` value into :class:`Slide` objects."""
     out: list[Slide] = []
@@ -199,8 +239,17 @@ def _coerce_slides(raw: Any) -> list[Slide]:
                 bullets = [str(b) for b in bullets_raw]
             else:
                 bullets = []
+            layout = str(item.get("layout") or "").strip().lower()
+            if layout not in ("title", "content"):
+                layout = "content"
             out.append(
-                Slide(title=str(item.get("title") or item.get("heading") or ""), bullets=bullets)
+                Slide(
+                    title=str(item.get("title") or item.get("heading") or ""),
+                    bullets=bullets,
+                    subtitle=str(item.get("subtitle") or ""),
+                    chart=_coerce_chart(item.get("chart")),
+                    layout=layout,
+                )
             )
         elif item is not None:
             out.append(Slide(title=str(item), bullets=[]))
@@ -303,9 +352,17 @@ def register_document_tools(mcp: FastMCP, client: BuildiumClient) -> None:
           and ``rows`` (each row a list of values aligned to the columns).
         * Document formats (``docx``, ``pdf``): supply ``sections`` (a list of
           ``{"heading", "body"}`` objects) and/or a ``columns``/``rows`` table.
-        * Slide decks (``pptx``): supply ``slides`` (a list of
-          ``{"title", "bullets": [..]}`` objects). A ``columns``/``rows`` table
-          is turned into a data slide when no slides are given.
+          Output is professionally styled (branded headings, a banded table).
+        * Slide decks (``pptx``): supply ``slides`` (a list of slide objects).
+          Each slide accepts ``{"title", "subtitle", "bullets": [..], "layout",
+          "chart"}``. Set ``layout="title"`` for a cover slide. Add a ``chart``
+          to visualize data instead of listing it as text, e.g.
+          ``{"kind": "column"|"bar"|"line"|"pie", "title": "..",
+          "categories": ["Jan", "Feb"], "series": [{"name": "Rent",
+          "values": [1000, 1200]}]}``. Prefer charts over long bullet lists for
+          numeric data so the deck is presentation-ready. A ``columns``/``rows``
+          table (with no slides) becomes a title slide plus a data slide that
+          renders a native table and an auto-derived chart when numeric.
 
         Args:
             file_format: One of ``csv``, ``xlsx``, ``docx``, ``pdf``, ``pptx``.
@@ -314,7 +371,7 @@ def register_document_tools(mcp: FastMCP, client: BuildiumClient) -> None:
             columns: Header row for tabular content.
             rows: Data rows aligned to ``columns``.
             sections: Narrative sections for ``docx``/``pdf``.
-            slides: Slides for ``pptx``.
+            slides: Slides for ``pptx`` (may include ``chart`` data).
         """
         fmt = (file_format or "").strip().lower()
         if fmt not in SUPPORTED_FORMATS:

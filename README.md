@@ -307,6 +307,22 @@ extra dependencies are introduced. The raw file bytes never go to the model — 
 assistant passes structured content (columns/rows, sections, or slides) and the
 server assembles the file. Generated files are capped at 25 MB.
 
+Generated documents are **presentation-ready**, not sparse text dumps. A shared
+brand theme (colours and fonts) drives every format:
+
+* **PowerPoint** decks are 16:9 widescreen with a branded slide master, an
+  accent stripe and title rule on each slide, styled titles/bullets, optional
+  cover ("title") slides, and native **charts** — column, bar, line, or pie —
+  rendered directly in the deck. Pass a `chart` on a slide
+  (`{"kind", "title", "categories", "series": [{"name", "values"}]}`) to
+  visualise data instead of listing it. A raw `columns`/`rows` table becomes a
+  cover slide plus a data slide with a real table and an auto-derived chart.
+* **Word** documents use professional Title/Heading/Normal styles (brand
+  colours, spacing, accent rule under headings) and render tables with a
+  coloured header row and banded (zebra) rows.
+* **PDF** reports use coloured headings, an accent rule under the title, a bold
+  font for emphasis, and shaded table header/zebra rows.
+
 ### Reliability & Ergonomics
 
 Several design choices make this server unusually reliable and easy to use for
