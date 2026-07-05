@@ -16,6 +16,11 @@ Design goals:
 * **Provider-neutral.** The raw bytes never go to the model. A tool builds the
   file, registers it here, and the ``/chat`` route streams it to the browser as
   a base64 ``artifact`` event so the extension can offer a download link.
+* **Presentation-ready.** A shared :data:`THEME_COLORS` palette drives every
+  format so output looks professional, not sparse: PPTX decks are widescreen,
+  themed, and can embed native charts (column/bar/line/pie) and tables; DOCX
+  uses styled headings and a banded, colour-headed table; PDF uses coloured
+  headings, a bold font, and shaded table rows.
 * **Per-request registry.** A :class:`contextvars.ContextVar` holds the files
   generated during the current chat turn, mirroring ``current_attachments``.
 """
@@ -60,6 +65,39 @@ class ArtifactError(ValueError):
     """Raised when a file cannot be generated from the supplied content."""
 
 
+# ---------------------------------------------------------------------------
+# Shared brand theme
+# ---------------------------------------------------------------------------
+# A single, corporate-looking palette drives every format so decks, documents
+# and PDFs share one identity. Colours are hex ``RRGGBB`` (no leading ``#``).
+# ``accentN`` map onto the PPTX theme's ``accentN`` slots and are reused for
+# chart series, table shading and heading colour.
+THEME_COLORS: dict[str, str] = {
+    "dk1": "1A2433",  # near-black body text
+    "lt1": "FFFFFF",  # page/slide background
+    "dk2": "44546A",  # secondary dark (subtitles)
+    "lt2": "EEF2F7",  # light band / table zebra fill
+    "accent1": "2F5597",  # primary deep blue (titles, header fill)
+    "accent2": "4472C4",  # blue
+    "accent3": "5B9BD5",  # light blue
+    "accent4": "70AD47",  # green
+    "accent5": "FFC000",  # amber
+    "accent6": "C55A11",  # orange
+    "hlink": "0563C1",
+    "folHlink": "954F72",
+}
+
+# Ordered accent colours reused to colour successive chart series/segments.
+_SERIES_COLORS: tuple[str, ...] = (
+    THEME_COLORS["accent1"],
+    THEME_COLORS["accent4"],
+    THEME_COLORS["accent5"],
+    THEME_COLORS["accent3"],
+    THEME_COLORS["accent6"],
+    THEME_COLORS["accent2"],
+)
+
+
 @dataclass
 class Section:
     """A narrative section for document formats (DOCX, PDF)."""
@@ -69,11 +107,34 @@ class Section:
 
 
 @dataclass
+class Chart:
+    """A simple chart to embed on a PPTX slide.
+
+    ``kind`` is one of ``bar``/``column``, ``line`` or ``pie``. ``categories``
+    are the x-axis labels; ``series`` is a list of ``(name, values)`` pairs with
+    one numeric value per category. Pie charts use only the first series.
+    """
+
+    categories: list[str] = field(default_factory=list)
+    series: list[tuple[str, list[float]]] = field(default_factory=list)
+    kind: str = "column"
+    title: str = ""
+
+
+@dataclass
 class Slide:
-    """A single slide for the PPTX format."""
+    """A single slide for the PPTX format.
+
+    A slide may carry bullet text, an embedded :class:`Chart`, or both. Setting
+    ``layout='title'`` renders a centred title slide (cover) instead of the
+    standard title-and-content layout.
+    """
 
     title: str = ""
     bullets: list[str] = field(default_factory=list)
+    subtitle: str = ""
+    chart: Chart | None = None
+    layout: str = "content"
 
 
 @dataclass
@@ -333,45 +394,133 @@ def _build_xlsx(title: str | None, columns: list[str], rows: list[list[object]])
     )
 
 
-def _docx_paragraph(text: str, *, bold: bool = False, size: int | None = None) -> str:
+def _docx_paragraph(
+    text: str,
+    *,
+    bold: bool = False,
+    size: int | None = None,
+    color: str | None = None,
+    style: str | None = None,
+    spacing_before: int | None = None,
+    spacing_after: int | None = None,
+) -> str:
     """Return a WordprocessingML paragraph for ``text`` (blank when empty)."""
-    run_props = ""
-    if bold or size:
-        parts = ["<w:b/>"] if bold else []
-        if size:
-            parts.append(f'<w:sz w:val="{size * 2}"/>')
-        run_props = f"<w:rPr>{''.join(parts)}</w:rPr>"
+    p_props_parts: list[str] = []
+    if style:
+        p_props_parts.append(f'<w:pStyle w:val="{style}"/>')
+    if spacing_before is not None or spacing_after is not None:
+        before = f' w:before="{spacing_before}"' if spacing_before is not None else ""
+        after = f' w:after="{spacing_after}"' if spacing_after is not None else ""
+        p_props_parts.append(f"<w:spacing{before}{after}/>")
+    p_props = f"<w:pPr>{''.join(p_props_parts)}</w:pPr>" if p_props_parts else ""
+
+    run_props_parts: list[str] = []
+    if bold:
+        run_props_parts.append("<w:b/>")
+    if color:
+        run_props_parts.append(f'<w:color w:val="{color}"/>')
+    if size:
+        run_props_parts.append(f'<w:sz w:val="{size * 2}"/>')
+    run_props = f"<w:rPr>{''.join(run_props_parts)}</w:rPr>" if run_props_parts else ""
+
     if not text:
-        return "<w:p/>"
-    return f'<w:p><w:r>{run_props}<w:t xml:space="preserve">{escape(text)}</w:t></w:r></w:p>'
+        return f"<w:p>{p_props}</w:p>"
+    return (
+        f'<w:p>{p_props}<w:r>{run_props}<w:t xml:space="preserve">{escape(text)}</w:t></w:r></w:p>'
+    )
 
 
 def _docx_table(columns: list[str], rows: list[list[object]]) -> str:
-    """Return a bordered WordprocessingML table for tabular content."""
+    """Return a professional, banded WordprocessingML table for tabular content."""
+    header_fill = THEME_COLORS["accent1"]
+    zebra_fill = THEME_COLORS["lt2"]
+    border_color = "D9D9D9"
     border = (
         "<w:tblBorders>"
         + "".join(
-            f'<w:{edge} w:val="single" w:sz="4" w:space="0" w:color="auto"/>'
+            f'<w:{edge} w:val="single" w:sz="4" w:space="0" w:color="{border_color}"/>'
             for edge in ("top", "left", "bottom", "right", "insideH", "insideV")
         )
         + "</w:tblBorders>"
     )
-    tbl_pr = f'<w:tblPr><w:tblW w:w="0" w:type="auto"/>{border}</w:tblPr>'
+    tbl_pr = (
+        "<w:tblPr>"
+        '<w:tblW w:w="5000" w:type="pct"/>'
+        f"{border}"
+        "<w:tblCellMar>"
+        '<w:top w:w="60" w:type="dxa"/><w:left w:w="108" w:type="dxa"/>'
+        '<w:bottom w:w="60" w:type="dxa"/><w:right w:w="108" w:type="dxa"/>'
+        "</w:tblCellMar>"
+        "</w:tblPr>"
+    )
 
-    def _cell(value: object, *, bold: bool) -> str:
-        run_props = "<w:rPr><w:b/></w:rPr>" if bold else ""
+    def _cell(value: object, *, header: bool, fill: str | None) -> str:
+        shade = f'<w:shd w:val="clear" w:color="auto" w:fill="{fill}"/>' if fill else ""
+        tc_pr = f'<w:tcPr><w:tcW w:w="0" w:type="auto"/>{shade}<w:vAlign w:val="center"/></w:tcPr>'
+        run_parts = []
+        if header:
+            run_parts.append("<w:b/>")
+            run_parts.append(f'<w:color w:val="{THEME_COLORS["lt1"]}"/>')
+        run_props = f"<w:rPr>{''.join(run_parts)}</w:rPr>" if run_parts else ""
         text = "" if value is None else str(value)
         return (
-            '<w:tc><w:tcPr><w:tcW w:w="0" w:type="auto"/></w:tcPr>'
-            f'<w:p><w:r>{run_props}<w:t xml:space="preserve">{escape(text)}</w:t></w:r></w:p></w:tc>'
+            f"<w:tc>{tc_pr}"
+            f'<w:p><w:pPr><w:spacing w:before="20" w:after="20"/></w:pPr>'
+            f'<w:r>{run_props}<w:t xml:space="preserve">{escape(text)}</w:t></w:r></w:p></w:tc>'
         )
 
     table_rows: list[str] = []
     if columns:
-        table_rows.append("<w:tr>" + "".join(_cell(c, bold=True) for c in columns) + "</w:tr>")
-    for row in rows:
-        table_rows.append("<w:tr>" + "".join(_cell(c, bold=False) for c in row) + "</w:tr>")
+        table_rows.append(
+            "<w:tr>"
+            + "".join(_cell(col, header=True, fill=header_fill) for col in columns)
+            + "</w:tr>"
+        )
+    for r_index, row in enumerate(rows):
+        fill = zebra_fill if r_index % 2 == 1 else None
+        table_rows.append(
+            "<w:tr>" + "".join(_cell(cell, header=False, fill=fill) for cell in row) + "</w:tr>"
+        )
     return f"<w:tbl>{tbl_pr}{''.join(table_rows)}</w:tbl>"
+
+
+def _docx_styles() -> str:
+    """Return a ``styles.xml`` defining professional Title/Heading/Normal styles."""
+    accent = THEME_COLORS["accent1"]
+    dk2 = THEME_COLORS["dk2"]
+    body = THEME_COLORS["dk1"]
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        "<w:docDefaults><w:rPrDefault><w:rPr>"
+        '<w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/>'
+        f'<w:color w:val="{body}"/><w:sz w:val="22"/>'
+        "</w:rPr></w:rPrDefault>"
+        '<w:pPrDefault><w:pPr><w:spacing w:after="160" w:line="264" w:lineRule="auto"/></w:pPr>'
+        "</w:pPrDefault></w:docDefaults>"
+        # Normal
+        '<w:style w:type="paragraph" w:default="1" w:styleId="Normal">'
+        '<w:name w:val="Normal"/></w:style>'
+        # Title
+        '<w:style w:type="paragraph" w:styleId="Title">'
+        '<w:name w:val="Title"/>'
+        '<w:pPr><w:spacing w:before="0" w:after="80"/></w:pPr>'
+        '<w:rPr><w:rFonts w:ascii="Calibri Light" w:hAnsi="Calibri Light"/>'
+        f'<w:b/><w:color w:val="{accent}"/><w:sz w:val="56"/></w:rPr></w:style>'
+        # Subtitle
+        '<w:style w:type="paragraph" w:styleId="Subtitle">'
+        '<w:name w:val="Subtitle"/>'
+        '<w:pPr><w:spacing w:before="0" w:after="240"/></w:pPr>'
+        f'<w:rPr><w:color w:val="{dk2}"/><w:sz w:val="26"/></w:rPr></w:style>'
+        # Heading 1
+        '<w:style w:type="paragraph" w:styleId="Heading1">'
+        '<w:name w:val="heading 1"/>'
+        '<w:pPr><w:spacing w:before="280" w:after="120"/>'
+        f'<w:pBdr><w:bottom w:val="single" w:sz="6" w:space="4" w:color="{accent}"/></w:pBdr></w:pPr>'
+        '<w:rPr><w:rFonts w:ascii="Calibri Light" w:hAnsi="Calibri Light"/>'
+        f'<w:b/><w:color w:val="{accent}"/><w:sz w:val="30"/></w:rPr></w:style>'
+        "</w:styles>"
+    )
 
 
 def _build_docx(
@@ -380,16 +529,16 @@ def _build_docx(
     columns: list[str],
     rows: list[list[object]],
 ) -> bytes:
-    """Build a minimal DOCX (WordprocessingML) document."""
+    """Build a styled, professional DOCX (WordprocessingML) document."""
     if not (title or sections or columns or rows):
         raise ArtifactError("A document export needs a title, sections, or a table.")
 
     body: list[str] = []
     if title:
-        body.append(_docx_paragraph(title, bold=True, size=20))
+        body.append(_docx_paragraph(title, style="Title"))
     for section in sections:
         if section.heading:
-            body.append(_docx_paragraph(section.heading, bold=True, size=15))
+            body.append(_docx_paragraph(section.heading, style="Heading1"))
         for line in (section.body or "").split("\n"):
             body.append(_docx_paragraph(line))
     if columns or rows:
@@ -407,6 +556,7 @@ def _build_docx(
         '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
         '<Default Extension="xml" ContentType="application/xml"/>'
         '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+        '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>'
         "</Types>"
     )
     root_rels = (
@@ -415,11 +565,19 @@ def _build_docx(
         '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>'
         "</Relationships>"
     )
+    document_rels = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+        "</Relationships>"
+    )
     return _zip_package(
         {
             "[Content_Types].xml": content_types,
             "_rels/.rels": root_rels,
             "word/document.xml": document,
+            "word/_rels/document.xml.rels": document_rels,
+            "word/styles.xml": _docx_styles(),
         }
     )
 
@@ -427,20 +585,445 @@ def _build_docx(
 # ---------------------------------------------------------------------------
 # PPTX
 # ---------------------------------------------------------------------------
-def _pptx_text_body(shape_id: int, name: str, title_para: str, body_paras: str) -> str:
-    """Assemble a text-box shape XML fragment for a PPTX slide."""
+# Widescreen 16:9 canvas (13.333in x 7.5in) in English Metric Units (914400/in).
+_PPTX_W = 12192000
+_PPTX_H = 6858000
+_PPTX_MARGIN = 640080  # ~0.7in left/right content margin
+_PPTX_STRIPE = 137160  # ~0.15in brand stripe width
+_PPTX_CONTENT_W = _PPTX_W - 2 * _PPTX_MARGIN
+
+
+def _pptx_run(text: str, *, size: int, bold: bool, color: str) -> str:
+    """Return a formatted DrawingML text run (``size`` in points)."""
     return (
-        "<p:sp><p:nvSpPr>"
-        f'<p:cNvPr id="{shape_id}" name="{escape(name)}"/><p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr>'
-        "<p:nvPr/></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/>"
-        f"{title_para}{body_paras}</p:txBody></p:sp>"
+        f'<a:r><a:rPr lang="en-US" sz="{size * 100}" b="{1 if bold else 0}" dirty="0">'
+        f'<a:solidFill><a:srgbClr val="{color}"/></a:solidFill></a:rPr>'
+        f"<a:t>{escape(text)}</a:t></a:r>"
     )
 
 
-def _pptx_paragraph(text: str, *, bullet: bool = False) -> str:
-    """Return a DrawingML paragraph for slide text."""
-    marker = "" if bullet else "<a:buNone/>"
-    return f"<a:p><a:pPr>{marker}</a:pPr><a:r><a:t>{escape(text)}</a:t></a:r></a:p>"
+def _pptx_para(
+    text: str,
+    *,
+    size: int = 18,
+    bold: bool = False,
+    color: str | None = None,
+    align: str = "l",
+    bullet: bool = False,
+) -> str:
+    """Return a formatted DrawingML paragraph."""
+    color = color or THEME_COLORS["dk1"]
+    if bullet:
+        marker = (
+            f'<a:buClr><a:srgbClr val="{THEME_COLORS["accent1"]}"/></a:buClr>'
+            '<a:buFont typeface="Arial"/><a:buChar char="&#8226;"/>'
+        )
+        p_pr = f'<a:pPr marL="285750" indent="-285750" algn="{align}">{marker}</a:pPr>'
+    else:
+        p_pr = f'<a:pPr algn="{align}"><a:buNone/></a:pPr>'
+    if not text:
+        return f"<a:p>{p_pr}</a:p>"
+    return f"<a:p>{p_pr}{_pptx_run(text, size=size, bold=bold, color=color)}</a:p>"
+
+
+def _pptx_textbox(
+    shape_id: int,
+    name: str,
+    *,
+    x: int,
+    y: int,
+    cx: int,
+    cy: int,
+    paragraphs: str,
+    anchor: str = "t",
+) -> str:
+    """Return a positioned text-box shape containing ``paragraphs``."""
+    return (
+        "<p:sp><p:nvSpPr>"
+        f'<p:cNvPr id="{shape_id}" name="{escape(name)}"/>'
+        '<p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr>'
+        f'<p:spPr><a:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm>'
+        '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr>'
+        f'<p:txBody><a:bodyPr wrap="square" anchor="{anchor}"><a:normAutofit/></a:bodyPr>'
+        f"<a:lstStyle/>{paragraphs or '<a:p/>'}</p:txBody></p:sp>"
+    )
+
+
+def _pptx_rect(shape_id: int, name: str, *, x: int, y: int, cx: int, cy: int, fill: str) -> str:
+    """Return a positioned, solid-filled rectangle (decorative graphic)."""
+    return (
+        "<p:sp><p:nvSpPr>"
+        f'<p:cNvPr id="{shape_id}" name="{escape(name)}"/>'
+        "<p:cNvSpPr/><p:nvPr/></p:nvSpPr>"
+        f'<p:spPr><a:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm>'
+        '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>'
+        f'<a:solidFill><a:srgbClr val="{fill}"/></a:solidFill><a:ln><a:noFill/></a:ln></p:spPr>'
+        "<p:txBody><a:bodyPr/><a:lstStyle/><a:p/></p:txBody></p:sp>"
+    )
+
+
+def _pptx_graphic_frame_chart(shape_id: int, rid: str, *, x: int, y: int, cx: int, cy: int) -> str:
+    """Return a graphic frame that embeds the chart referenced by ``rid``."""
+    return (
+        "<p:graphicFrame><p:nvGraphicFramePr>"
+        f'<p:cNvPr id="{shape_id}" name="Chart {shape_id}"/>'
+        "<p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>"
+        f'<p:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{cx}" cy="{cy}"/></p:xfrm>'
+        '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart">'
+        '<c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" '
+        f'r:id="{rid}"/></a:graphicData></a:graphic></p:graphicFrame>'
+    )
+
+
+def _pptx_table_frame(
+    shape_id: int, columns: list[str], rows: list[list[object]], *, x: int, y: int, cx: int, cy: int
+) -> str:
+    """Return a graphic frame containing a styled, banded native PPTX table."""
+    n_cols = max(len(columns), max((len(r) for r in rows), default=0)) or 1
+    col_w = cx // n_cols
+    grid = "".join(f'<a:gridCol w="{col_w}"/>' for _ in range(n_cols))
+
+    def _tc(value: object, *, header: bool, fill: str | None) -> str:
+        text = "" if value is None else str(value)
+        color = THEME_COLORS["lt1"] if header else THEME_COLORS["dk1"]
+        run = _pptx_run(text, size=13 if header else 12, bold=header, color=color)
+        body = f'<a:p><a:pPr algn="l"/>{run if text else ""}</a:p>'
+        fill_xml = (
+            f'<a:solidFill><a:srgbClr val="{fill}"/></a:solidFill>' if fill else "<a:noFill/>"
+        )
+        return (
+            f"<a:tc><a:txBody><a:bodyPr/><a:lstStyle/>{body}</a:txBody>"
+            f'<a:tcPr marL="45720" marR="45720" marT="22860" marB="22860" anchor="ctr">'
+            f"{fill_xml}</a:tcPr></a:tc>"
+        )
+
+    trs: list[str] = []
+    if columns:
+        cells = "".join(
+            _tc(columns[i] if i < len(columns) else "", header=True, fill=THEME_COLORS["accent1"])
+            for i in range(n_cols)
+        )
+        trs.append(f'<a:tr h="370840">{cells}</a:tr>')
+    for r_index, row in enumerate(rows):
+        fill = THEME_COLORS["lt2"] if r_index % 2 == 1 else THEME_COLORS["lt1"]
+        cells = "".join(
+            _tc(row[i] if i < len(row) else "", header=False, fill=fill) for i in range(n_cols)
+        )
+        trs.append(f'<a:tr h="320040">{cells}</a:tr>')
+
+    return (
+        "<p:graphicFrame><p:nvGraphicFramePr>"
+        f'<p:cNvPr id="{shape_id}" name="Table {shape_id}"/>'
+        "<p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>"
+        f'<p:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{cx}" cy="{cy}"/></p:xfrm>'
+        '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table">'
+        '<a:tbl><a:tblPr firstRow="1" bandRow="1"/>'
+        f"<a:tblGrid>{grid}</a:tblGrid>{''.join(trs)}</a:tbl>"
+        "</a:graphicData></a:graphic></p:graphicFrame>"
+    )
+
+
+def _num(value: object) -> float | None:
+    """Coerce ``value`` to a float, tolerating currency/percent formatting."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        cleaned = value.strip().replace(",", "").replace("$", "").replace("%", "")
+        if not cleaned:
+            return None
+        try:
+            return float(cleaned)
+        except ValueError:
+            return None
+    return None
+
+
+def _chart_from_table(columns: list[str], rows: list[list[object]]) -> Chart | None:
+    """Derive a column chart from the first label column + numeric columns."""
+    if not rows or len(columns) < 2:
+        return None
+    categories = [str(r[0]) if r else "" for r in rows]
+    series: list[tuple[str, list[float]]] = []
+    for c_index in range(1, len(columns)):
+        values: list[float] = []
+        numeric = True
+        for row in rows:
+            cell = row[c_index] if c_index < len(row) else None
+            num = _num(cell)
+            if num is None:
+                numeric = False
+                break
+            values.append(num)
+        if numeric and values:
+            series.append((str(columns[c_index]), values))
+    if not series:
+        return None
+    # Keep the deck readable: cap categories/series for a derived chart.
+    if len(categories) > 12:
+        categories = categories[:12]
+        series = [(name, vals[:12]) for name, vals in series]
+    return Chart(categories=categories, series=series[:4], kind="column")
+
+
+def _num_cache(values: list[float]) -> str:
+    pts = "".join(f'<c:pt idx="{i}"><c:v>{v:g}</c:v></c:pt>' for i, v in enumerate(values))
+    return (
+        f"<c:numCache><c:formatCode>General</c:formatCode>"
+        f'<c:ptCount val="{len(values)}"/>{pts}</c:numCache>'
+    )
+
+
+def _str_cache(labels: list[str]) -> str:
+    pts = "".join(f'<c:pt idx="{i}"><c:v>{escape(v)}</c:v></c:pt>' for i, v in enumerate(labels))
+    return f'<c:strCache><c:ptCount val="{len(labels)}"/>{pts}</c:strCache>'
+
+
+def _pptx_chart_xml(chart: Chart) -> str:
+    """Return a standalone chart part rendering ``chart`` from cached values."""
+    kind = (chart.kind or "column").strip().lower()
+    categories = [str(c) for c in chart.categories]
+    series = [(str(n), [float(v) for v in vals]) for n, vals in chart.series if vals]
+    if not series:
+        raise ArtifactError("A chart needs at least one data series.")
+    n_cat = len(categories)
+
+    title_xml = ""
+    if chart.title:
+        title_xml = (
+            "<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/>"
+            f'<a:p><a:pPr><a:defRPr sz="1400" b="1">'
+            f'<a:solidFill><a:srgbClr val="{THEME_COLORS["dk2"]}"/></a:solidFill>'
+            "</a:defRPr></a:pPr>"
+            f'<a:r><a:rPr lang="en-US"/><a:t>{escape(chart.title)}</a:t></a:r></a:p>'
+            '</c:rich></c:tx><c:overlay val="0"/></c:title>'
+        )
+
+    def _cat_ref() -> str:
+        return (
+            f"<c:cat><c:strRef><c:f>Sheet1!$A$2:$A${n_cat + 1}</c:f>"
+            f"{_str_cache(categories)}</c:strRef></c:cat>"
+        )
+
+    if kind in ("pie", "doughnut"):
+        name, values = series[0]
+        d_pts = "".join(
+            f'<c:dPt><c:idx val="{i}"/><c:bubble3D val="0"/>'
+            f'<c:spPr><a:solidFill><a:srgbClr val="{_SERIES_COLORS[i % len(_SERIES_COLORS)]}"/>'
+            "</a:solidFill></c:spPr></c:dPt>"
+            for i in range(len(values))
+        )
+        plot = (
+            '<c:pieChart><c:varyColors val="1"/>'
+            '<c:ser><c:idx val="0"/><c:order val="0"/>'
+            f"<c:tx><c:strRef><c:f>Sheet1!$B$1</c:f>{_str_cache([name])}</c:strRef></c:tx>"
+            f"{d_pts}{_cat_ref()}"
+            f"<c:val><c:numRef><c:f>Sheet1!$B$2:$B${n_cat + 1}</c:f>{_num_cache(values)}"
+            "</c:numRef></c:val></c:ser>"
+            '<c:firstSliceAng val="0"/></c:pieChart>'
+        )
+        axes = ""
+    else:
+        is_line = kind == "line"
+        sers: list[str] = []
+        for s_index, (name, values) in enumerate(series):
+            color = _SERIES_COLORS[s_index % len(_SERIES_COLORS)]
+            col_letter = chr(ord("B") + s_index)
+            if is_line:
+                sp_pr = f'<c:spPr><a:ln w="28575"><a:solidFill><a:srgbClr val="{color}"/></a:solidFill></a:ln></c:spPr>'
+                marker = '<c:marker><c:symbol val="circle"/><c:size val="6"/></c:marker>'
+            else:
+                sp_pr = f'<c:spPr><a:solidFill><a:srgbClr val="{color}"/></a:solidFill></c:spPr>'
+                marker = ""
+            sers.append(
+                f'<c:ser><c:idx val="{s_index}"/><c:order val="{s_index}"/>'
+                f"<c:tx><c:strRef><c:f>Sheet1!${col_letter}$1</c:f>{_str_cache([name])}"
+                "</c:strRef></c:tx>"
+                f"{sp_pr}{marker}{_cat_ref()}"
+                f"<c:val><c:numRef><c:f>Sheet1!${col_letter}$2:${col_letter}${n_cat + 1}</c:f>"
+                f"{_num_cache(values)}</c:numRef></c:val></c:ser>"
+            )
+        if is_line:
+            plot = (
+                '<c:lineChart><c:grouping val="standard"/><c:varyColors val="0"/>'
+                + "".join(sers)
+                + '<c:marker val="1"/><c:axId val="111111111"/><c:axId val="222222222"/></c:lineChart>'
+            )
+        else:
+            plot = (
+                '<c:barChart><c:barDir val="col"/><c:grouping val="clustered"/>'
+                '<c:varyColors val="0"/>'
+                + "".join(sers)
+                + '<c:gapWidth val="120"/><c:axId val="111111111"/><c:axId val="222222222"/></c:barChart>'
+            )
+        axes = (
+            '<c:catAx><c:axId val="111111111"/><c:scaling><c:orientation val="minMax"/></c:scaling>'
+            '<c:delete val="0"/><c:axPos val="b"/>'
+            f'<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="1000">'
+            f'<a:solidFill><a:srgbClr val="{THEME_COLORS["dk2"]}"/></a:solidFill></a:defRPr></a:pPr>'
+            '<a:endParaRPr lang="en-US"/></a:p></c:txPr>'
+            '<c:crossAx val="222222222"/></c:catAx>'
+            '<c:valAx><c:axId val="222222222"/><c:scaling><c:orientation val="minMax"/></c:scaling>'
+            '<c:delete val="0"/><c:axPos val="l"/>'
+            '<c:majorGridlines><c:spPr><a:ln><a:solidFill><a:srgbClr val="E2E7EE"/></a:solidFill>'
+            "</a:ln></c:spPr></c:majorGridlines>"
+            f'<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="1000">'
+            f'<a:solidFill><a:srgbClr val="{THEME_COLORS["dk2"]}"/></a:solidFill></a:defRPr></a:pPr>'
+            '<a:endParaRPr lang="en-US"/></a:p></c:txPr>'
+            '<c:crossAx val="111111111"/></c:valAx>'
+        )
+
+    legend = '<c:legend><c:legendPos val="b"/><c:overlay val="0"/></c:legend>'
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" '
+        'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        "<c:chart>"
+        f"{title_xml}"
+        f'<c:autoTitleDeleted val="{0 if chart.title else 1}"/>'
+        f"<c:plotArea><c:layout/>{plot}{axes}</c:plotArea>"
+        f"{legend}"
+        '<c:plotVisOnly val="1"/><c:dispBlanksAs val="gap"/>'
+        "</c:chart></c:chartSpace>"
+    )
+
+
+def _pptx_slide_shapes(slide: Slide, base_id: int) -> tuple[str, list[str]]:
+    """Return (shape XML, chart parts) for one slide.
+
+    ``chart parts`` is a list of chart XML strings this slide references (in
+    relationship order rId2, rId3, ...).
+    """
+    stripe = _pptx_rect(
+        base_id, "Brand Stripe", x=0, y=0, cx=_PPTX_STRIPE, cy=_PPTX_H, fill=THEME_COLORS["accent1"]
+    )
+    charts: list[str] = []
+
+    if slide.layout == "title":
+        # Cover slide: full accent background with centred title/subtitle.
+        bg = _pptx_rect(
+            base_id, "Cover", x=0, y=0, cx=_PPTX_W, cy=_PPTX_H, fill=THEME_COLORS["accent1"]
+        )
+        accent_bar = _pptx_rect(
+            base_id + 1,
+            "Accent",
+            x=_PPTX_MARGIN,
+            y=3200400,
+            cx=1828800,
+            cy=68580,
+            fill=THEME_COLORS["accent5"],
+        )
+        title_para = _pptx_para(
+            slide.title or "Presentation", size=44, bold=True, color=THEME_COLORS["lt1"], align="l"
+        )
+        title_box = _pptx_textbox(
+            base_id + 2,
+            "Title",
+            x=_PPTX_MARGIN,
+            y=2300000,
+            cx=_PPTX_CONTENT_W,
+            cy=900000,
+            paragraphs=title_para,
+        )
+        shapes = bg + accent_bar + title_box
+        if slide.subtitle:
+            sub_para = _pptx_para(
+                slide.subtitle, size=22, bold=False, color=THEME_COLORS["lt2"], align="l"
+            )
+            shapes += _pptx_textbox(
+                base_id + 3,
+                "Subtitle",
+                x=_PPTX_MARGIN,
+                y=3350000,
+                cx=_PPTX_CONTENT_W,
+                cy=700000,
+                paragraphs=sub_para,
+            )
+        return shapes, charts
+
+    # Standard content slide.
+    title_text = slide.title or "Slide"
+    title_para = _pptx_para(title_text, size=30, bold=True, color=THEME_COLORS["accent1"])
+    title_box = _pptx_textbox(
+        base_id,
+        "Title",
+        x=_PPTX_MARGIN,
+        y=320040,
+        cx=_PPTX_CONTENT_W,
+        cy=850000,
+        paragraphs=title_para,
+    )
+    rule = _pptx_rect(
+        base_id + 1,
+        "Rule",
+        x=_PPTX_MARGIN,
+        y=1150000,
+        cx=_PPTX_CONTENT_W,
+        cy=27432,
+        fill=THEME_COLORS["accent3"],
+    )
+    shapes = stripe + title_box + rule
+
+    content_top = 1360000
+    content_h = _PPTX_H - content_top - 400000
+    has_bullets = bool(slide.bullets)
+    has_chart = slide.chart is not None
+
+    next_id = base_id + 2
+    if slide.subtitle:
+        sub_para = _pptx_para(slide.subtitle, size=16, bold=False, color=THEME_COLORS["dk2"])
+        shapes += _pptx_textbox(
+            next_id,
+            "Subtitle",
+            x=_PPTX_MARGIN,
+            y=1180000,
+            cx=_PPTX_CONTENT_W,
+            cy=300000,
+            paragraphs=sub_para,
+        )
+        next_id += 1
+
+    if has_bullets and has_chart:
+        half = (_PPTX_CONTENT_W - 274320) // 2
+        bullets = "".join(_pptx_para(b, size=16, bullet=True) for b in slide.bullets) or "<a:p/>"
+        shapes += _pptx_textbox(
+            next_id,
+            "Content",
+            x=_PPTX_MARGIN,
+            y=content_top,
+            cx=half,
+            cy=content_h,
+            paragraphs=bullets,
+        )
+        next_id += 1
+        charts.append(_pptx_chart_xml(slide.chart))
+        shapes += _pptx_graphic_frame_chart(
+            next_id, "rId2", x=_PPTX_MARGIN + half + 274320, y=content_top, cx=half, cy=content_h
+        )
+        next_id += 1
+    elif has_chart:
+        charts.append(_pptx_chart_xml(slide.chart))
+        shapes += _pptx_graphic_frame_chart(
+            next_id, "rId2", x=_PPTX_MARGIN, y=content_top, cx=_PPTX_CONTENT_W, cy=content_h
+        )
+        next_id += 1
+    else:
+        bullets = "".join(_pptx_para(b, size=18, bullet=True) for b in slide.bullets) or "<a:p/>"
+        shapes += _pptx_textbox(
+            next_id,
+            "Content",
+            x=_PPTX_MARGIN,
+            y=content_top,
+            cx=_PPTX_CONTENT_W,
+            cy=content_h,
+            paragraphs=bullets,
+        )
+        next_id += 1
+
+    return shapes, charts
 
 
 def _build_pptx(
@@ -449,41 +1032,82 @@ def _build_pptx(
     columns: list[str],
     rows: list[list[object]],
 ) -> bytes:
-    """Build a minimal PPTX (PresentationML) slide deck."""
+    """Build a themed, presentation-ready PPTX (PresentationML) slide deck."""
     deck: list[Slide] = list(slides)
+    table_slide_index: int | None = None
     if not deck:
         # Derive slides from a title and/or a table when explicit slides are absent.
         if title:
-            deck.append(Slide(title=title, bullets=[]))
+            deck.append(Slide(title=title, subtitle="", layout="title"))
         if columns or rows:
-            header = " | ".join(str(c) for c in columns) if columns else ""
-            bullets = [header] if header else []
-            bullets.extend(" | ".join("" if c is None else str(c) for c in row) for row in rows)
-            deck.append(Slide(title="Data", bullets=bullets[:40]))
+            table_slide_index = len(deck)
+            deck.append(Slide(title="Data", bullets=[]))
     if not deck:
         raise ArtifactError("A slide deck export needs 'slides', a title, or a table.")
 
     slide_parts: dict[str, str] = {}
     slide_rels: dict[str, str] = {}
+    chart_parts: dict[str, str] = {}
+    chart_count = 0
     presentation_slide_ids: list[str] = []
     presentation_rels: list[str] = []
 
     for index, slide in enumerate(deck, start=1):
-        title_para = (
-            "<p:sp><p:nvSpPr>"
-            f'<p:cNvPr id="2" name="Title {index}"/><p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr>'
-            '<p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/>'
-            f"{_pptx_paragraph(slide.title or f'Slide {index}')}</p:txBody></p:sp>"
-        )
-        bullets = "".join(
-            _pptx_paragraph(b, bullet=True) for b in slide.bullets
-        ) or _pptx_paragraph("")
-        body_shape = (
-            "<p:sp><p:nvSpPr>"
-            f'<p:cNvPr id="3" name="Content {index}"/><p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr>'
-            '<p:nvPr><p:ph idx="1"/></p:nvPr></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/>'
-            f"{bullets}</p:txBody></p:sp>"
-        )
+        shapes, charts = _pptx_slide_shapes(slide, base_id=10)
+
+        extra_frames = ""
+        # The derived table slide renders an actual native table (not text).
+        if table_slide_index is not None and index == table_slide_index + 1 and (columns or rows):
+            extra_frames = _pptx_table_frame(
+                90,
+                columns,
+                rows[:14],
+                x=_PPTX_MARGIN,
+                y=1360000,
+                cx=_PPTX_CONTENT_W,
+                cy=_PPTX_H - 1360000 - 400000,
+            )
+            derived = _chart_from_table(columns, rows)
+            if derived is not None:
+                # Split: table left, chart right.
+                half = (_PPTX_CONTENT_W - 274320) // 2
+                extra_frames = _pptx_table_frame(
+                    90,
+                    columns,
+                    rows[:14],
+                    x=_PPTX_MARGIN,
+                    y=1360000,
+                    cx=half,
+                    cy=_PPTX_H - 1360000 - 400000,
+                )
+                charts = [_pptx_chart_xml(derived)]
+                shapes += _pptx_graphic_frame_chart(
+                    91,
+                    "rId2",
+                    x=_PPTX_MARGIN + half + 274320,
+                    y=1360000,
+                    cx=half,
+                    cy=_PPTX_H - 1360000 - 400000,
+                )
+        shapes += extra_frames
+
+        # Build slide relationships: rId1 is always the layout; charts follow.
+        rels = [
+            '<Relationship Id="rId1" '
+            'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" '
+            'Target="../slideLayouts/slideLayout1.xml"/>'
+        ]
+        for c_offset, chart_xml in enumerate(charts):
+            chart_count += 1
+            chart_name = f"ppt/charts/chart{chart_count}.xml"
+            chart_parts[chart_name] = chart_xml
+            rid = f"rId{c_offset + 2}"
+            rels.append(
+                f'<Relationship Id="{rid}" '
+                'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" '
+                f'Target="../charts/chart{chart_count}.xml"/>'
+            )
+
         slide_xml = (
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             '<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
@@ -492,7 +1116,7 @@ def _build_pptx(
             "<p:cSld><p:spTree>"
             '<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>'
             "<p:grpSpPr/>"
-            f"{title_para}{body_shape}"
+            f"{shapes}"
             "</p:spTree></p:cSld><p:clrMapOvr><a:overrideClrMapping "
             'bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1" accent2="accent2" '
             'accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" '
@@ -502,8 +1126,8 @@ def _build_pptx(
         slide_rels[f"ppt/slides/_rels/slide{index}.xml.rels"] = (
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>'
-            "</Relationships>"
+            + "".join(rels)
+            + "</Relationships>"
         )
         rid = f"rId{index + 1}"  # rId1 reserved for the slide master
         presentation_slide_ids.append(f'<p:sldId id="{255 + index}" r:id="{rid}"/>')
@@ -518,7 +1142,7 @@ def _build_pptx(
         'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">'
         '<p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId1"/></p:sldMasterIdLst>'
         f"<p:sldIdLst>{''.join(presentation_slide_ids)}</p:sldIdLst>"
-        '<p:sldSz cx="9144000" cy="6858000"/><p:notesSz cx="6858000" cy="9144000"/>'
+        f'<p:sldSz cx="{_PPTX_W}" cy="{_PPTX_H}"/><p:notesSz cx="6858000" cy="9144000"/>'
         "</p:presentation>"
     )
     presentation_rels_xml = (
@@ -530,7 +1154,7 @@ def _build_pptx(
     )
 
     parts: dict[str, str | bytes] = {
-        "[Content_Types].xml": _pptx_content_types(len(deck)),
+        "[Content_Types].xml": _pptx_content_types(len(deck), chart_count),
         "_rels/.rels": (
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
@@ -558,14 +1182,20 @@ def _build_pptx(
     }
     parts.update(slide_parts)
     parts.update(slide_rels)
+    parts.update(chart_parts)
     return _zip_package(parts)
 
 
-def _pptx_content_types(slide_count: int) -> str:
+def _pptx_content_types(slide_count: int, chart_count: int) -> str:
     overrides = "".join(
         f'<Override PartName="/ppt/slides/slide{i}.xml" '
         'ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>'
         for i in range(1, slide_count + 1)
+    )
+    chart_overrides = "".join(
+        f'<Override PartName="/ppt/charts/chart{i}.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>'
+        for i in range(1, chart_count + 1)
     )
     return (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
@@ -576,7 +1206,7 @@ def _pptx_content_types(slide_count: int) -> str:
         '<Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/>'
         '<Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/>'
         '<Override PartName="/ppt/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>'
-        f"{overrides}</Types>"
+        f"{overrides}{chart_overrides}</Types>"
     )
 
 
@@ -614,20 +1244,20 @@ def _pptx_slide_layout() -> str:
 
 def _pptx_theme() -> str:
     scheme_colors = "".join(
-        f'<a:{tag}><a:srgbClr val="{val}"/></a:{tag}>'
-        for tag, val in (
-            ("dk1", "000000"),
-            ("lt1", "FFFFFF"),
-            ("dk2", "44546A"),
-            ("lt2", "E7E6E6"),
-            ("accent1", "4472C4"),
-            ("accent2", "ED7D31"),
-            ("accent3", "A5A5A5"),
-            ("accent4", "FFC000"),
-            ("accent5", "5B9BD5"),
-            ("accent6", "70AD47"),
-            ("hlink", "0563C1"),
-            ("folHlink", "954F72"),
+        f'<a:{tag}><a:srgbClr val="{THEME_COLORS[key]}"/></a:{tag}>'
+        for tag, key in (
+            ("dk1", "dk1"),
+            ("lt1", "lt1"),
+            ("dk2", "dk2"),
+            ("lt2", "lt2"),
+            ("accent1", "accent1"),
+            ("accent2", "accent2"),
+            ("accent3", "accent3"),
+            ("accent4", "accent4"),
+            ("accent5", "accent5"),
+            ("accent6", "accent6"),
+            ("hlink", "hlink"),
+            ("folHlink", "folHlink"),
         )
     )
     font_scheme = (
@@ -693,41 +1323,58 @@ def _pdf_escape(text: str) -> str:
     return text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
 
 
+def _hex_to_pdf_rgb(hex_color: str) -> str:
+    """Convert an ``RRGGBB`` hex colour to a PDF ``r g b`` operand string (0..1)."""
+    r = int(hex_color[0:2], 16) / 255
+    g = int(hex_color[2:4], 16) / 255
+    b = int(hex_color[4:6], 16) / 255
+    return f"{r:.3f} {g:.3f} {b:.3f}"
+
+
+# Vertical layout for the PDF text grid (US-Letter, 612x792 points).
+_PDF_LEFT = 56
+_PDF_RIGHT = 556
+_PDF_TOP = 748
+_PDF_LEADING = 16
+
+
 def _build_pdf(
     title: str | None,
     sections: list[Section],
     columns: list[str],
     rows: list[list[object]],
 ) -> bytes:
-    """Build a minimal multi-page text PDF from the supplied content."""
-    lines: list[tuple[str, bool]] = []  # (text, is_heading)
+    """Build a styled, multi-page text PDF from the supplied content."""
+    # Each entry is (text, kind); kind drives colour, weight and background.
+    lines: list[tuple[str, str]] = []
     if title:
-        lines.append((title, True))
-        lines.append(("", False))
+        lines.append((title, "title"))
+        lines.append(("", "blank"))
     for section in sections:
         if section.heading:
-            lines.append((section.heading, True))
+            lines.append((section.heading, "heading"))
         for wrapped in _wrap(section.body or "", _PDF_MAX_CHARS_PER_LINE):
-            lines.append((wrapped, False))
-        lines.append(("", False))
+            lines.append((wrapped, "body"))
+        lines.append(("", "blank"))
     if columns or rows:
         if columns:
-            lines.append((" | ".join(str(c) for c in columns), True))
-        for row in rows:
+            lines.append((" | ".join(str(c) for c in columns), "thead"))
+        for r_index, row in enumerate(rows):
+            kind = "row_odd" if r_index % 2 else "row_even"
             text = " | ".join("" if c is None else str(c) for c in row)
             for wrapped in _wrap(text, _PDF_MAX_CHARS_PER_LINE):
-                lines.append((wrapped, False))
+                lines.append((wrapped, kind))
 
     if not lines:
         raise ArtifactError("A PDF export needs a title, sections, or a table.")
 
     # Paginate the lines.
-    pages: list[list[tuple[str, bool]]] = [
+    pages: list[list[tuple[str, str]]] = [
         lines[i : i + _PDF_LINES_PER_PAGE] for i in range(0, len(lines), _PDF_LINES_PER_PAGE)
     ]
 
-    # Build PDF objects. Object 1: catalog, 2: pages, 3: font, then per page a
-    # page object and a content stream object.
+    # Build PDF objects. Object 1: catalog, 2: pages, 3: regular font, 4: bold
+    # font, then per page a page object and a content stream object.
     objects: list[bytes] = []
 
     def add_object(body: bytes) -> int:
@@ -739,6 +1386,7 @@ def _build_pdf(
     objects.append(b"")  # 1 catalog (placeholder)
     objects.append(b"")  # 2 pages (placeholder)
     font_num = add_object(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+    font_bold_num = add_object(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>")
 
     page_nums: list[int] = []
     for page_lines in pages:
@@ -752,7 +1400,8 @@ def _build_pdf(
         )
         page_body = (
             b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
-            b"/Resources << /Font << /F1 " + str(font_num).encode("ascii") + b" 0 R >> >> "
+            b"/Resources << /Font << /F1 " + str(font_num).encode("ascii") + b" 0 R "
+            b"/F2 " + str(font_bold_num).encode("ascii") + b" 0 R >> >> "
             b"/Contents " + str(stream_num).encode("ascii") + b" 0 R >>"
         )
         page_nums.append(add_object(page_body))
@@ -770,16 +1419,59 @@ def _build_pdf(
     return _assemble_pdf(objects)
 
 
-def _pdf_content_stream(page_lines: list[tuple[str, bool]]) -> bytes:
-    """Return the content stream drawing ``page_lines`` top-to-bottom."""
-    parts = [b"BT", b"/F1 11 Tf", b"14 TL", b"56 748 Td"]
-    for text, is_heading in page_lines:
-        size = b"13" if is_heading else b"11"
-        parts.append(b"/F1 " + size + b" Tf")
-        shown = _pdf_escape(text) if text else ""
-        parts.append(b"(" + shown.encode("latin-1", errors="replace") + b") Tj")
-        parts.append(b"T*")
-    parts.append(b"ET")
+# (text_color_hex, font, size, fill_hex_or_None) per line kind.
+_PDF_LINE_STYLE: dict[str, tuple[str, bytes, int, str | None]] = {
+    "title": (THEME_COLORS["accent1"], b"F2", 20, None),
+    "heading": (THEME_COLORS["accent1"], b"F2", 14, None),
+    "thead": (THEME_COLORS["lt1"], b"F2", 11, THEME_COLORS["accent1"]),
+    "row_even": (THEME_COLORS["dk1"], b"F1", 11, None),
+    "row_odd": (THEME_COLORS["dk1"], b"F1", 11, THEME_COLORS["lt2"]),
+    "body": (THEME_COLORS["dk1"], b"F1", 11, None),
+    "blank": (THEME_COLORS["dk1"], b"F1", 11, None),
+}
+
+
+def _pdf_content_stream(page_lines: list[tuple[str, str]]) -> bytes:
+    """Return the content stream drawing ``page_lines`` with colour and shading."""
+    parts: list[bytes] = []
+    for i, (text, kind) in enumerate(page_lines):
+        color_hex, font, size, fill_hex = _PDF_LINE_STYLE.get(kind, _PDF_LINE_STYLE["body"])
+        y = _PDF_TOP - i * _PDF_LEADING
+
+        # Background band for table header / zebra rows.
+        if fill_hex:
+            parts.append(
+                f"{_hex_to_pdf_rgb(fill_hex)} rg "
+                f"{_PDF_LEFT - 6} {y - 4} {_PDF_RIGHT - _PDF_LEFT + 12} {_PDF_LEADING} re f".encode(
+                    "ascii"
+                )
+            )
+
+        if text:
+            shown = _pdf_escape(text).encode("latin-1", errors="replace")
+            parts.append(
+                b"BT /"
+                + font
+                + b" "
+                + str(size).encode("ascii")
+                + b" Tf "
+                + _hex_to_pdf_rgb(color_hex).encode("ascii")
+                + b" rg "
+                + str(_PDF_LEFT).encode("ascii")
+                + b" "
+                + str(y).encode("ascii")
+                + b" Td ("
+                + shown
+                + b") Tj ET"
+            )
+
+        # Accent rule beneath the document title.
+        if kind == "title":
+            rule_y = y - 6
+            parts.append(
+                f"{_hex_to_pdf_rgb(THEME_COLORS['accent3'])} RG 1.5 w "
+                f"{_PDF_LEFT} {rule_y} m {_PDF_RIGHT} {rule_y} l S".encode("ascii")
+            )
     return b"\n".join(parts)
 
 

@@ -12,6 +12,7 @@ import pytest
 from mcp_server_buildium.llm.artifacts import (
     MAX_ARTIFACT_BYTES,
     ArtifactError,
+    Chart,
     Section,
     Slide,
     add_current_artifact,
@@ -112,6 +113,121 @@ def test_pptx_derives_slide_from_table_when_no_slides() -> None:
     gf = build_generated_file(file_format="pptx", title="From Table", columns=COLUMNS, rows=ROWS)
     blob = _ooxml_text(gf.data)
     assert "Maple Court" in blob
+
+
+def test_pptx_is_widescreen_and_uses_theme_accent() -> None:
+    gf = build_generated_file(file_format="pptx", title="Deck", slides=SLIDES)
+    zf = zipfile.ZipFile(io.BytesIO(gf.data))
+    presentation = zf.read("ppt/presentation.xml").decode()
+    # 16:9 widescreen canvas (12192000 x 6858000 EMU).
+    assert 'cx="12192000"' in presentation
+    theme = zf.read("ppt/theme/theme1.xml").decode()
+    assert "2F5597" in theme  # brand accent1 propagated to the theme
+
+
+def test_pptx_embeds_chart_part() -> None:
+    gf = build_generated_file(
+        file_format="pptx",
+        slides=[
+            Slide(
+                title="Occupancy",
+                bullets=["Maple leads"],
+                chart=Chart(
+                    categories=["Maple", "Oak"],
+                    series=[("Occupancy", [92, 100])],
+                    kind="column",
+                    title="Occupancy %",
+                ),
+            )
+        ],
+    )
+    zf = zipfile.ZipFile(io.BytesIO(gf.data))
+    names = zf.namelist()
+    assert "ppt/charts/chart1.xml" in names
+    chart = zf.read("ppt/charts/chart1.xml").decode()
+    assert "<c:barChart>" in chart
+    assert "<c:numCache>" in chart  # renders from cached values (no workbook needed)
+    slide_rels = zf.read("ppt/slides/_rels/slide1.xml.rels").decode()
+    assert "charts/chart1.xml" in slide_rels
+    content_types = zf.read("[Content_Types].xml").decode()
+    assert "drawingml.chart+xml" in content_types
+    # The slide references the chart through a graphic frame.
+    assert "graphicFrame" in zf.read("ppt/slides/slide1.xml").decode()
+
+
+def test_pptx_supports_pie_and_line_charts() -> None:
+    gf = build_generated_file(
+        file_format="pptx",
+        slides=[
+            Slide(
+                title="Mix",
+                chart=Chart(categories=["A", "B"], series=[("s", [70, 30])], kind="pie"),
+            ),
+            Slide(
+                title="Trend",
+                chart=Chart(categories=["Jan", "Feb"], series=[("y", [1, 2])], kind="line"),
+            ),
+        ],
+    )
+    blob = _ooxml_text(gf.data)
+    assert "<c:pieChart>" in blob
+    assert "<c:lineChart>" in blob
+
+
+def test_pptx_derived_table_slide_has_native_table_and_chart() -> None:
+    gf = build_generated_file(
+        file_format="pptx",
+        title="Portfolio",
+        columns=["Property", "Units"],
+        rows=[["Maple", 12], ["Oak", 8]],
+    )
+    zf = zipfile.ZipFile(io.BytesIO(gf.data))
+    blob = _ooxml_text(gf.data)
+    # A native table (a:tbl) rather than bullet text, plus an auto-derived chart.
+    assert "<a:tbl>" in blob
+    assert "ppt/charts/chart1.xml" in zf.namelist()
+
+
+def test_pptx_chart_without_series_raises() -> None:
+    with pytest.raises(ArtifactError):
+        build_generated_file(
+            file_format="pptx",
+            slides=[Slide(title="Empty", chart=Chart(categories=["A"], series=[]))],
+        )
+
+
+def test_docx_has_styles_and_shaded_table() -> None:
+    gf = build_generated_file(
+        file_format="docx",
+        title="Property Report",
+        sections=SECTIONS,
+        columns=COLUMNS,
+        rows=ROWS,
+    )
+    zf = zipfile.ZipFile(io.BytesIO(gf.data))
+    names = zf.namelist()
+    assert "word/styles.xml" in names
+    document = zf.read("word/document.xml").decode()
+    assert 'w:pStyle w:val="Title"' in document
+    assert 'w:pStyle w:val="Heading1"' in document
+    # Header row is shaded with the brand accent colour.
+    assert 'w:fill="2F5597"' in document
+    content_types = zf.read("[Content_Types].xml").decode()
+    assert "wordprocessingml.styles+xml" in content_types
+
+
+def test_pdf_is_styled_with_colour_and_bold_font() -> None:
+    gf = build_generated_file(
+        file_format="pdf",
+        title="Report",
+        sections=SECTIONS,
+        columns=COLUMNS,
+        rows=ROWS,
+    )
+    assert gf.data.startswith(b"%PDF-1.4")
+    # A bold font resource and colour operators indicate the styled layout.
+    assert b"Helvetica-Bold" in gf.data
+    assert b" rg" in gf.data  # fill-colour operator used for headings/shading
 
 
 def test_unsupported_format_raises() -> None:

@@ -233,6 +233,44 @@ def test_create_download_file_pptx_from_slides() -> None:
         current_artifacts.reset(token)
 
 
+def test_create_download_file_pptx_with_chart_and_layout() -> None:
+    _client, tools = _build_server()
+    token = set_current_artifacts()
+    try:
+        result = asyncio.run(
+            tools["create_download_file"].run(
+                {
+                    "file_format": "pptx",
+                    "title": "Portfolio Review",
+                    "slides": [
+                        {"title": "Q3 Review", "subtitle": "Executive summary", "layout": "title"},
+                        {
+                            "title": "Occupancy",
+                            "bullets": ["Maple leads at 92%"],
+                            "chart": {
+                                "kind": "column",
+                                "title": "Occupancy %",
+                                "categories": ["Maple", "Oak"],
+                                "series": [{"name": "Occupancy", "values": [92, 100]}],
+                            },
+                        },
+                    ],
+                }
+            )
+        )
+        data = _structured(result)["data"]
+        assert data["format"] == "pptx"
+        artifacts = get_current_artifacts()
+        assert len(artifacts) == 1
+        import io
+        import zipfile
+
+        zf = zipfile.ZipFile(io.BytesIO(artifacts[0].data))
+        assert "ppt/charts/chart1.xml" in zf.namelist()
+    finally:
+        current_artifacts.reset(token)
+
+
 def test_create_download_file_unsupported_format_errors() -> None:
     _client, tools = _build_server()
     token = set_current_artifacts()
