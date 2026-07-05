@@ -96,9 +96,9 @@ Per-user scoping is enforced at both surfaces, for visibility and hard denial:
 
 ## Admin management routes (`/manage/*`)
 
-An optional, **admin-only** capability lets an administrator manage users and
-distribute the browser extension. It is disabled by default and turned on with
-`BUILDIUM_MANAGEMENT_ENABLED=true`.
+An optional, **admin-only** capability lets an administrator manage users,
+configure the server-side LLM assistant, and distribute the browser extension. It
+is disabled by default and turned on with `BUILDIUM_MANAGEMENT_ENABLED=true`.
 
 Enabling it makes the self-contained admin UI (`GET /manage/`) and the
 LLM-configuration routes available immediately — these need no Microsoft Graph
@@ -117,14 +117,24 @@ Non-admin callers receive `403`; unauthenticated callers receive `401`.
 
 | Route | Method | Purpose |
 | --- | --- | --- |
+| `/manage/` | GET | Serve the self-contained admin web UI (HTML page). |
 | `/manage/capabilities` | GET | Report whether management is enabled and whether the caller is an admin (lets the extension show/hide its admin panel). |
 | `/manage/users` | GET | List users assigned to the API app and their coarse roles. |
 | `/manage/users` | POST | Invite an Entra **B2B guest** (`{email, role}`) and assign the role. |
 | `/manage/users/{id}/role` | PATCH | Change a user's role (`{role}`). |
 | `/manage/extension?browser=chrome\|firefox` | GET | Download the prebuilt, preconfigured extension archive. |
+| `/manage/llm` | GET | Return the current LLM config with API keys masked. |
+| `/manage/llm` | PUT | Replace the full LLM config (providers + model tiers). |
+| `/manage/llm/tier/{tier}` | PATCH | Update a single model-tier assignment. |
+| `/manage/llm/test` | POST | Validate a provider API key with a live request. |
 
 Management actions are recorded in the audit trail (`manage_invite_user`,
 `manage_edit_role`, `manage_list_users`, `manage_download_extension`).
+
+The LLM config is persisted to an on-disk config store
+(`BUILDIUM_LLM_CONFIG_PATH`, default `llm_config.json`). Set `BUILDIUM_LLM_STORE_KEY`
+(a Fernet key) to encrypt stored provider API keys at rest; without it the keys
+are stored in plaintext and a warning is logged at startup.
 
 ### Microsoft Graph setup
 
