@@ -11,8 +11,7 @@ from mcp_server_buildium.entra_graph import GraphClient, GraphError
 from mcp_server_buildium.security.policy import is_admin_claims
 
 ROLE_MAP = (
-    '{"Buildium.Admin":"admin","Buildium.Operator":"operator",'
-    '"Buildium.ReadOnly":"readonly"}'
+    '{"Buildium.Admin":"admin","Buildium.Operator":"operator","Buildium.ReadOnly":"readonly"}'
 )
 ROLE_ID_MAP = (
     '{"admin":"11111111-1111-1111-1111-111111111111",'
@@ -376,17 +375,12 @@ def test_route_capabilities_reports_admin(manage_client) -> None:
 
 
 def test_route_downloads_chrome_extension(manage_client) -> None:
-    resp = manage_client.get(
-        "/manage/extension?browser=chrome", headers=_auth("admin-token")
-    )
+    resp = manage_client.get("/manage/extension?browser=chrome", headers=_auth("admin-token"))
     assert resp.status_code == 200
     assert resp.content.startswith(b"PK")
     assert "attachment" in resp.headers.get("content-disposition", "")
 
 
 def test_route_download_missing_firefox_is_503(manage_client) -> None:
-    resp = manage_client.get(
-        "/manage/extension?browser=firefox", headers=_auth("admin-token")
-    )
+    resp = manage_client.get("/manage/extension?browser=firefox", headers=_auth("admin-token"))
     assert resp.status_code == 503
-

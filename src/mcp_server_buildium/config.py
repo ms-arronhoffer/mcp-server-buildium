@@ -580,20 +580,16 @@ class BuildiumConfig(BaseSettings):
                 "(set BUILDIUM_GRAPH_TENANT_ID or BUILDIUM_ENTRA_TENANT_ID)"
             )
         if not (self.graph_client_id and self.graph_client_id.strip()):
-            raise ValueError(
-                "BUILDIUM_MANAGEMENT_ENABLED=true requires BUILDIUM_GRAPH_CLIENT_ID"
-            )
+            raise ValueError("BUILDIUM_MANAGEMENT_ENABLED=true requires BUILDIUM_GRAPH_CLIENT_ID")
         if not (self.graph_client_secret and self.graph_client_secret.strip()):
             raise ValueError(
                 "BUILDIUM_MANAGEMENT_ENABLED=true requires BUILDIUM_GRAPH_CLIENT_SECRET"
             )
         if not (
-            self.entra_api_service_principal_id
-            and self.entra_api_service_principal_id.strip()
+            self.entra_api_service_principal_id and self.entra_api_service_principal_id.strip()
         ):
             raise ValueError(
-                "BUILDIUM_MANAGEMENT_ENABLED=true requires "
-                "BUILDIUM_ENTRA_API_SERVICE_PRINCIPAL_ID"
+                "BUILDIUM_MANAGEMENT_ENABLED=true requires BUILDIUM_ENTRA_API_SERVICE_PRINCIPAL_ID"
             )
         role_ids = self._parse_app_role_id_map()
         if not role_ids:
@@ -620,9 +616,7 @@ class BuildiumConfig(BaseSettings):
                 "coarse role names to Entra App Role IDs"
             ) from exc
         if not isinstance(parsed, dict) or not parsed:
-            raise ValueError(
-                "BUILDIUM_ENTRA_APP_ROLE_ID_MAP must be a non-empty JSON object"
-            )
+            raise ValueError("BUILDIUM_ENTRA_APP_ROLE_ID_MAP must be a non-empty JSON object")
         result: dict[str, str] = {}
         for key, value in parsed.items():
             role = str(key).strip().lower()
