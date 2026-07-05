@@ -83,6 +83,10 @@ def test_default_system_prompt_present() -> None:
     assert "property-management assistant" in prompt
     # Steers friendly formatting and clickable, drill-down list rows.
     assert "action:" in prompt
+    # A unit is only unique within its property, so display guidance must
+    # require the property whenever a unit is shown.
+    assert "unique within its property" in prompt
+    assert "concise yet precise" in prompt
     custom = _cfg(llm_system_prompt="Be terse.")
     assert custom.get_llm_system_prompt() == "Be terse."
 
