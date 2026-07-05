@@ -122,6 +122,10 @@ def test_every_registered_tool_is_mapped_or_local(
         "work_order_cycle_time_anomaly",
         "vacancy_duration_anomaly",
         "data_quality_anomaly_scan",
+        # AWS SES email dispatch
+        "send_email",
+        "send_email_to_tenant",
+        "send_email_to_owner",
     }
     unmapped = set(registered_tool_names) - set(tool_operations) - server_local
     assert not unmapped, f"Tools with no operation mapping: {sorted(unmapped)}"

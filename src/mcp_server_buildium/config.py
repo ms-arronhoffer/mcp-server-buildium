@@ -56,6 +56,7 @@ ALL_CATEGORIES = frozenset(
         "alerts",
         "analytics",
         "intelligence",
+        "email",
     }
 )
 
@@ -453,6 +454,37 @@ class BuildiumConfig(BaseSettings):
         description="Path for the file audit sink (required when BUILDIUM_AUDIT_SINK=file).",
     )
 
+    # -- AWS / SES -----------------------------------------------------------
+    aws_region: str = Field(
+        default="us-east-1",
+        description="AWS region for the SES client (e.g. 'us-east-1').",
+    )
+    aws_access_key_id: str | None = Field(
+        default=None,
+        description=(
+            "AWS access key ID. When absent, boto3 falls back to the standard "
+            "credential chain (IAM role, env vars, ~/.aws/credentials)."
+        ),
+    )
+    aws_secret_access_key: str | None = Field(
+        default=None,
+        description="AWS secret access key paired with BUILDIUM_AWS_ACCESS_KEY_ID.",
+    )
+    aws_ses_sender: str | None = Field(
+        default=None,
+        description=(
+            "Verified SES 'From' address used for all outgoing emails "
+            "(e.g. 'noreply@yourdomain.com'). Required to enable the email category."
+        ),
+    )
+    aws_ses_endpoint_url: str | None = Field(
+        default=None,
+        description=(
+            "Optional SES endpoint URL override. Use for LocalStack "
+            "(e.g. 'http://localhost:4566') or other compatible services."
+        ),
+    )
+
     model_config = {
         "env_prefix": "BUILDIUM_",
         "case_sensitive": False,
@@ -832,6 +864,11 @@ class BuildiumConfig(BaseSettings):
             return None
         origins = [o.strip() for o in self.cors_allow_origins.split(",") if o.strip()]
         return origins or None
+
+    # --- AWS / SES helpers -------------------------------------------------
+    def ses_enabled(self) -> bool:
+        """Return True when an SES sender address is configured."""
+        return bool(self.aws_ses_sender and self.aws_ses_sender.strip())
 
     # --- LLM helpers -------------------------------------------------------
     def llm_enabled(self) -> bool:
