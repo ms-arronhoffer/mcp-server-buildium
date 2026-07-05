@@ -25,6 +25,7 @@ from .tools.budgets import register_budget_tools
 from .tools.close import register_close_tools
 from .tools.communications import register_communication_tools
 from .tools.documents import register_document_tools
+from .tools.email import register_email_tools
 from .tools.files import register_file_tools
 from .tools.general_ledger import register_general_ledger_tools
 from .tools.intelligence import register_intelligence_tools
@@ -105,11 +106,17 @@ _CATEGORY_REGISTRARS = {
     "alerts": register_alert_tools,
     "analytics": register_analytics_tools,
     "intelligence": register_intelligence_tools,
+    "email": register_email_tools,
 }
 
 for _category, _register in _CATEGORY_REGISTRARS.items():
-    if config.is_category_enabled(_category):
-        _register(mcp, buildium_client)
+    if not config.is_category_enabled(_category):
+        continue
+    # The email category requires SES to be configured; skip it silently otherwise.
+    if _category == "email" and not config.ses_enabled():
+        logger.debug("Skipping email category: BUILDIUM_AWS_SES_SENDER not set")
+        continue
+    _register(mcp, buildium_client)
 
 # Register the server-side assistant HTTP routes (/chat, /capabilities). These are
 # only reachable over the HTTP transport; they run the LLM loop server-side so

@@ -152,6 +152,24 @@
           </p>
           <div class="row" id="download-buttons"></div>
         </fieldset>
+
+        <fieldset id="llm-config-panel" hidden>
+          <legend>AI Model Configuration</legend>
+          <p class="hint">
+            Assign a provider and model to each routing tier. Changes take effect
+            on the next chat request. Open the full admin UI for provider key
+            management.
+          </p>
+
+          <div id="llm-tiers-area"></div>
+
+          <div class="row" style="margin-top:8px">
+            <button type="button" id="open-llm-ui-btn">Open full LLM admin UI ↗</button>
+            <button type="button" id="refresh-llm-btn">Refresh</button>
+            <span id="llm-status" class="status" aria-live="polite"></span>
+          </div>
+          <ul id="llm-errors" class="errors"></ul>
+        </fieldset>
       </section>
     </main>
     <script type="module" src="options.js"></script>

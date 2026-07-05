@@ -1,6 +1,7 @@
 """Configuration management for Buildium MCP Server."""
 
 import json
+import warnings
 
 from dotenv import load_dotenv
 from pydantic import Field, model_validator
@@ -55,6 +56,7 @@ ALL_CATEGORIES = frozenset(
         "alerts",
         "analytics",
         "intelligence",
+        "email",
     }
 )
 
@@ -342,6 +344,7 @@ class BuildiumConfig(BaseSettings):
     llm_router_enabled: bool = Field(
         default=False,
         description=(
+            "DEPRECATED — use the admin UI at /manage/ instead. "
             "Enable the model router. When true, each /chat request is automatically "
             "routed to the best provider/model based on the prompt. "
             "BUILDIUM_LLM_ROUTER_PROVIDERS must also be set. "
@@ -353,6 +356,7 @@ class BuildiumConfig(BaseSettings):
     llm_router_providers: str | None = Field(
         default=None,
         description=(
+            "DEPRECATED — use the admin UI at /manage/ instead. "
             "Ordered JSON array of provider+model pairs for the router. "
             'Each entry must have "provider" (openai|anthropic|gemini) and "model". '
             "The API key for each provider must be set via the corresponding "
@@ -367,6 +371,26 @@ class BuildiumConfig(BaseSettings):
             "Model-router strategy: "
             "'classifier' (heuristic prompt classification selects the best provider) or "
             "'fallback' (try providers in config order, fall back on failure)."
+        ),
+    )
+
+    # --- LLM config store (web-configured models & keys) -------------------
+    llm_config_path: str = Field(
+        default="llm_config.json",
+        description=(
+            "Path to the JSON file that persists LLM provider keys and per-tier model "
+            "assignments configured via the admin UI (/manage/). When set to an empty "
+            "string the store is disabled and the legacy BUILDIUM_LLM_* env vars are "
+            "used instead. Defaults to 'llm_config.json' in the working directory."
+        ),
+    )
+    llm_store_key: str | None = Field(
+        default=None,
+        description=(
+            "Fernet key used to encrypt LLM API keys at rest in the config store file. "
+            "Generate one with: python -c \"from cryptography.fernet import Fernet; "
+            "print(Fernet.generate_key().decode())\". When unset, keys are stored in "
+            "plaintext with a startup warning."
         ),
     )
 
@@ -430,6 +454,37 @@ class BuildiumConfig(BaseSettings):
         description="Path for the file audit sink (required when BUILDIUM_AUDIT_SINK=file).",
     )
 
+    # -- AWS / SES -----------------------------------------------------------
+    aws_region: str = Field(
+        default="us-east-1",
+        description="AWS region for the SES client (e.g. 'us-east-1').",
+    )
+    aws_access_key_id: str | None = Field(
+        default=None,
+        description=(
+            "AWS access key ID. When absent, boto3 falls back to the standard "
+            "credential chain (IAM role, env vars, ~/.aws/credentials)."
+        ),
+    )
+    aws_secret_access_key: str | None = Field(
+        default=None,
+        description="AWS secret access key paired with BUILDIUM_AWS_ACCESS_KEY_ID.",
+    )
+    aws_ses_sender: str | None = Field(
+        default=None,
+        description=(
+            "Verified SES 'From' address used for all outgoing emails "
+            "(e.g. 'noreply@yourdomain.com'). Required to enable the email category."
+        ),
+    )
+    aws_ses_endpoint_url: str | None = Field(
+        default=None,
+        description=(
+            "Optional SES endpoint URL override. Use for LocalStack "
+            "(e.g. 'http://localhost:4566') or other compatible services."
+        ),
+    )
+
     model_config = {
         "env_prefix": "BUILDIUM_",
         "case_sensitive": False,
@@ -481,6 +536,27 @@ class BuildiumConfig(BaseSettings):
 
     def _validate_llm(self) -> None:
         """Validate the optional server-side LLM configuration."""
+        # Emit a deprecation warning when legacy LLM env vars are set,
+        # unless the store-based path is intentionally empty (disabled).
+        _legacy_vars_set = any([
+            self.llm_provider,
+            self.llm_model,
+            self.llm_openai_api_key,
+            self.llm_anthropic_api_key,
+            self.llm_gemini_api_key,
+            self.llm_router_enabled,
+            self.llm_router_providers,
+        ])
+        if _legacy_vars_set and self.llm_config_path and self.llm_config_path.strip():
+            warnings.warn(
+                "BUILDIUM_LLM_* and BUILDIUM_LLM_ROUTER_* environment variables are "
+                "deprecated. Configure models and API keys through the admin UI at "
+                "/manage/ instead. These env vars will be ignored once the config store "
+                "file has been written via the admin UI.",
+                DeprecationWarning,
+                stacklevel=4,
+            )
+
         if self.llm_router_enabled:
             # Router mode: validate router config; single-provider fields are ignored.
             self._validate_llm_router()
@@ -788,6 +864,11 @@ class BuildiumConfig(BaseSettings):
             return None
         origins = [o.strip() for o in self.cors_allow_origins.split(",") if o.strip()]
         return origins or None
+
+    # --- AWS / SES helpers -------------------------------------------------
+    def ses_enabled(self) -> bool:
+        """Return True when an SES sender address is configured."""
+        return bool(self.aws_ses_sender and self.aws_ses_sender.strip())
 
     # --- LLM helpers -------------------------------------------------------
     def llm_enabled(self) -> bool:

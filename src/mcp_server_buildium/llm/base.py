@@ -133,8 +133,15 @@ def build_llm(
     """Return the appropriate LLM provider or :class:`~.router.ModelRouter`.
 
     This is the preferred factory for the ``/chat`` endpoint. It transparently
-    delegates to :func:`build_provider` (single-provider mode) or
-    :func:`.router.build_router` (when ``BUILDIUM_LLM_ROUTER_ENABLED=true``).
+    delegates to:
+
+    1. :func:`.router.build_router_from_store` when the admin-UI config store
+       has at least one tier fully configured (provider + model). This is the
+       recommended production path — models and keys are configured via the
+       ``/manage/`` admin web page, **not** environment variables.
+    2. :func:`.router.build_router` (legacy env-based router) when
+       ``BUILDIUM_LLM_ROUTER_ENABLED=true``.
+    3. :func:`build_provider` (legacy single-provider env vars) otherwise.
 
     Args:
         config: Server configuration with LLM settings populated.
@@ -144,11 +151,43 @@ def build_llm(
         client: Optional shared ``httpx.AsyncClient`` (mainly for tests).
 
     Raises:
-        ValueError: when no LLM is configured.
+        ValueError: when no LLM is configured (neither store nor env vars).
     """
-    if config.llm_router_enabled:
-        from .router import build_router
+    from .config_store import get_store
+    from .router import build_router, build_router_from_store
 
+    # --- 1. Store-based (admin UI) path ----------------------------------
+    store = get_store(config)
+    if store is not None:
+        llm_cfg = store.load()
+        if llm_cfg is not None and llm_cfg.is_configured():
+            return build_router_from_store(llm_cfg, pinned_model=model, client=client)
+
+        # Store exists but is empty → seed from env vars if set, then use store.
+        if llm_cfg is None or not llm_cfg.is_configured():
+            from .config_store import LLMConfigStore
+
+            seeded = LLMConfigStore.seed_from_buildium_config(config)
+            if seeded.is_configured():
+                import asyncio
+
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        # Can't await inside build_llm (called synchronously);
+                        # schedule the save as a background task and use the
+                        # seeded config this request.
+                        loop.create_task(store.save(seeded))
+                    else:
+                        loop.run_until_complete(store.save(seeded))
+                except Exception:  # pragma: no cover
+                    pass  # Best-effort; don't fail a /chat request over a store write.
+                return build_router_from_store(seeded, pinned_model=model, client=client)
+
+    # --- 2. Legacy env-based router --------------------------------------
+    if config.llm_router_enabled:
         pinned = model or None
         return build_router(config, pinned_model=pinned, client=client)
+
+    # --- 3. Legacy single-provider env vars ------------------------------
     return build_provider(config, model=model, client=client)

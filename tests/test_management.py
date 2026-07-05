@@ -305,6 +305,51 @@ def manage_client(monkeypatch, tmp_path):
         yield tc
 
 
+@pytest.fixture()
+def manage_client_with_llm(monkeypatch, tmp_path):
+    """Like manage_client but with an LLM config store path set."""
+    import warnings
+
+    from fastmcp import FastMCP
+    from starlette.testclient import TestClient
+
+    from mcp_server_buildium import management_endpoint
+    from mcp_server_buildium.llm.config_store import reset_store
+
+    archive = tmp_path / "chrome.zip"
+    archive.write_bytes(b"PK\x03\x04 fake-zip")
+    llm_store_path = str(tmp_path / "llm_config.json")
+
+    cfg = _cfg(
+        entra_role_policy_map=ROLE_MAP,
+        management_enabled=True,
+        graph_client_id="graph-app",
+        graph_client_secret="graph-secret",
+        entra_api_service_principal_id="sp-1",
+        entra_app_role_id_map=ROLE_ID_MAP,
+        management_extension_chrome_path=str(archive),
+        llm_config_path=llm_store_path,
+    )
+    verifier = _StubVerifier(
+        {
+            "admin-token": {"roles": ["Buildium.Admin"]},
+            "operator-token": {"roles": ["Buildium.Operator"]},
+        }
+    )
+    monkeypatch.setattr(management_endpoint, "GraphClient", _StubGraph)
+    reset_store()
+
+    mcp = FastMCP("test")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        management_endpoint.register_management_routes(mcp, cfg, verifier, None)
+    app = mcp.http_app(path="/mcp")
+    with TestClient(app) as tc:
+        yield tc
+
+    reset_store()
+
+
 def _auth(token: str) -> dict[str, str]:
     return {"Authorization": "Bearer " + token}
 
@@ -364,12 +409,11 @@ def test_route_edits_role(manage_client) -> None:
 
 def test_route_capabilities_reports_admin(manage_client) -> None:
     admin = manage_client.get("/manage/capabilities", headers=_auth("admin-token")).json()
-    assert admin == {
-        "enabled": True,
-        "isAdmin": True,
-        "roles": ["admin", "operator", "readonly"],
-        "extensionBrowsers": ["chrome"],
-    }
+    assert admin["enabled"] is True
+    assert admin["isAdmin"] is True
+    assert admin["roles"] == ["admin", "operator", "readonly"]
+    assert admin["extensionBrowsers"] == ["chrome"]
+    assert "llmConfigured" in admin  # present regardless of store config
     op = manage_client.get("/manage/capabilities", headers=_auth("operator-token")).json()
     assert op["isAdmin"] is False
 
@@ -384,3 +428,276 @@ def test_route_downloads_chrome_extension(manage_client) -> None:
 def test_route_download_missing_firefox_is_503(manage_client) -> None:
     resp = manage_client.get("/manage/extension?browser=firefox", headers=_auth("admin-token"))
     assert resp.status_code == 503
+
+
+# ---------------------------------------------------------------------------
+# Admin UI (GET /manage/)
+# ---------------------------------------------------------------------------
+
+def test_admin_ui_returns_html(manage_client) -> None:
+    resp = manage_client.get("/manage/")
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers.get("content-type", "")
+    assert "<html" in resp.text.lower()
+
+
+def test_admin_ui_disabled_when_management_off(monkeypatch, tmp_path) -> None:
+    import warnings
+    from fastmcp import FastMCP
+    from starlette.testclient import TestClient
+    from mcp_server_buildium import management_endpoint
+
+    cfg = _cfg(management_enabled=False)
+    verifier = _StubVerifier({})
+    monkeypatch.setattr(management_endpoint, "GraphClient", _StubGraph)
+    mcp = FastMCP("test")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        management_endpoint.register_management_routes(mcp, cfg, verifier, None)
+    app = mcp.http_app(path="/mcp")
+    with TestClient(app) as tc:
+        resp = tc.get("/manage/")
+    assert resp.status_code == 503
+
+
+# ---------------------------------------------------------------------------
+# Capabilities: llmConfigured field
+# ---------------------------------------------------------------------------
+
+def test_capabilities_reports_llm_configured_false_without_store(manage_client) -> None:
+    resp = manage_client.get("/manage/capabilities", headers=_auth("admin-token"))
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "llmConfigured" in data
+    assert data["llmConfigured"] is False
+
+
+def test_capabilities_reports_llm_configured_true_when_store_has_tiers(
+    manage_client_with_llm,
+) -> None:
+    # Seed the store via PUT first.
+    manage_client_with_llm.put(
+        "/manage/llm",
+        headers=_auth("admin-token"),
+        json={
+            "providers": {"openai": {"api_key": "sk-test", "base_url": "", "enabled": True}},
+            "tiers": {"simple": {"provider": "openai", "model": "gpt-4o-mini"}},
+        },
+    )
+    resp = manage_client_with_llm.get("/manage/capabilities", headers=_auth("admin-token"))
+    assert resp.json()["llmConfigured"] is True
+
+
+# ---------------------------------------------------------------------------
+# GET /manage/llm
+# ---------------------------------------------------------------------------
+
+def test_llm_get_requires_admin(manage_client_with_llm) -> None:
+    assert manage_client_with_llm.get("/manage/llm").status_code == 401
+    assert manage_client_with_llm.get(
+        "/manage/llm", headers=_auth("operator-token")
+    ).status_code == 403
+
+
+def test_llm_get_returns_empty_config_initially(manage_client_with_llm) -> None:
+    resp = manage_client_with_llm.get("/manage/llm", headers=_auth("admin-token"))
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "tiers" in data
+    assert "providers" in data
+
+
+def test_llm_get_503_when_no_store(monkeypatch, tmp_path) -> None:
+    """GET /manage/llm returns 503 when the LLM store path is explicitly empty."""
+    import warnings
+    from fastmcp import FastMCP
+    from starlette.testclient import TestClient
+    from mcp_server_buildium import management_endpoint
+    from mcp_server_buildium.llm.config_store import reset_store
+
+    archive = tmp_path / "chrome.zip"
+    archive.write_bytes(b"PK\x03\x04 fake-zip")
+    cfg = _cfg(
+        entra_role_policy_map=ROLE_MAP,
+        management_enabled=True,
+        graph_client_id="graph-app",
+        graph_client_secret="graph-secret",
+        entra_api_service_principal_id="sp-1",
+        entra_app_role_id_map=ROLE_ID_MAP,
+        management_extension_chrome_path=str(archive),
+        llm_config_path="",  # explicitly disabled
+    )
+    verifier = _StubVerifier({"admin-token": {"roles": ["Buildium.Admin"]}})
+    monkeypatch.setattr(management_endpoint, "GraphClient", _StubGraph)
+    reset_store()
+
+    mcp = FastMCP("test")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        management_endpoint.register_management_routes(mcp, cfg, verifier, None)
+    app = mcp.http_app(path="/mcp")
+    with TestClient(app) as tc:
+        resp = tc.get("/manage/llm", headers=_auth("admin-token"))
+    assert resp.status_code == 503
+    reset_store()
+
+
+# ---------------------------------------------------------------------------
+# PUT /manage/llm
+# ---------------------------------------------------------------------------
+
+def test_llm_put_saves_config(manage_client_with_llm) -> None:
+    body = {
+        "providers": {"openai": {"api_key": "sk-test", "base_url": "", "enabled": True}},
+        "tiers": {"simple": {"provider": "openai", "model": "gpt-4o-mini"}},
+    }
+    resp = manage_client_with_llm.put(
+        "/manage/llm", headers=_auth("admin-token"), json=body
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["tiers"]["simple"]["model"] == "gpt-4o-mini"
+    # Key must be masked in response.
+    assert "sk-test" not in str(data)
+
+
+def test_llm_put_requires_admin(manage_client_with_llm) -> None:
+    assert manage_client_with_llm.put(
+        "/manage/llm", headers=_auth("operator-token"), json={}
+    ).status_code == 403
+
+
+def test_llm_put_preserves_masked_key(manage_client_with_llm) -> None:
+    # First, save a real key.
+    manage_client_with_llm.put(
+        "/manage/llm",
+        headers=_auth("admin-token"),
+        json={
+            "providers": {"openai": {"api_key": "sk-secret", "base_url": "", "enabled": True}},
+            "tiers": {},
+        },
+    )
+    # Get the masked display.
+    get_resp = manage_client_with_llm.get("/manage/llm", headers=_auth("admin-token"))
+    masked = get_resp.json()["providers"]["openai"]["api_key_masked"]
+
+    # PUT back with the masked value — key must not be cleared.
+    put_resp = manage_client_with_llm.put(
+        "/manage/llm",
+        headers=_auth("admin-token"),
+        json={
+            "providers": {"openai": {"api_key": masked, "base_url": "", "enabled": True}},
+            "tiers": {"thinking": {"provider": "openai", "model": "gpt-4o"}},
+        },
+    )
+    assert put_resp.status_code == 200
+    # If the key was accidentally cleared, GET would show an empty masked string.
+    second_get = manage_client_with_llm.get("/manage/llm", headers=_auth("admin-token"))
+    new_masked = second_get.json()["providers"]["openai"]["api_key_masked"]
+    assert new_masked  # not empty — key was preserved
+
+
+# ---------------------------------------------------------------------------
+# PATCH /manage/llm/tier/{tier}
+# ---------------------------------------------------------------------------
+
+def test_llm_tier_patch_updates_tier(manage_client_with_llm) -> None:
+    resp = manage_client_with_llm.patch(
+        "/manage/llm/tier/simple",
+        headers=_auth("admin-token"),
+        json={"provider": "openai", "model": "gpt-4o"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["tiers"]["simple"]["model"] == "gpt-4o"
+
+
+def test_llm_tier_patch_rejects_invalid_tier(manage_client_with_llm) -> None:
+    resp = manage_client_with_llm.patch(
+        "/manage/llm/tier/bogus",
+        headers=_auth("admin-token"),
+        json={"provider": "openai", "model": "gpt-4o"},
+    )
+    assert resp.status_code == 400
+
+
+def test_llm_tier_patch_rejects_invalid_provider(manage_client_with_llm) -> None:
+    resp = manage_client_with_llm.patch(
+        "/manage/llm/tier/simple",
+        headers=_auth("admin-token"),
+        json={"provider": "unknown", "model": "some-model"},
+    )
+    assert resp.status_code == 400
+
+
+def test_llm_tier_patch_requires_admin(manage_client_with_llm) -> None:
+    assert manage_client_with_llm.patch(
+        "/manage/llm/tier/simple",
+        headers=_auth("operator-token"),
+        json={"provider": "openai", "model": "gpt-4o"},
+    ).status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# POST /manage/llm/test
+# ---------------------------------------------------------------------------
+
+def test_llm_test_rejects_missing_provider(manage_client_with_llm) -> None:
+    resp = manage_client_with_llm.post(
+        "/manage/llm/test",
+        headers=_auth("admin-token"),
+        json={"provider": "unknown", "api_key": "x"},
+    )
+    assert resp.status_code == 400
+
+
+def test_llm_test_rejects_missing_key(manage_client_with_llm) -> None:
+    resp = manage_client_with_llm.post(
+        "/manage/llm/test",
+        headers=_auth("admin-token"),
+        json={"provider": "openai", "api_key": ""},
+    )
+    assert resp.status_code == 400
+
+
+def test_llm_test_requires_admin(manage_client_with_llm) -> None:
+    assert manage_client_with_llm.post(
+        "/manage/llm/test",
+        headers=_auth("operator-token"),
+        json={"provider": "openai", "api_key": "sk-x"},
+    ).status_code == 403
+
+
+def test_llm_test_uses_stored_key_when_no_key_provided(
+    manage_client_with_llm, monkeypatch
+) -> None:
+    import asyncio
+    from mcp_server_buildium import management_endpoint
+
+    # Pre-store a key.
+    manage_client_with_llm.put(
+        "/manage/llm",
+        headers=_auth("admin-token"),
+        json={
+            "providers": {"openai": {"api_key": "sk-stored", "base_url": "", "enabled": True}},
+            "tiers": {},
+        },
+    )
+
+    called_with = {}
+
+    async def _mock_test(provider, api_key, base_url):
+        called_with["provider"] = provider
+        called_with["api_key"] = api_key
+        return True, "ok"
+
+    monkeypatch.setattr(management_endpoint, "_test_provider", _mock_test)
+
+    resp = manage_client_with_llm.post(
+        "/manage/llm/test",
+        headers=_auth("admin-token"),
+        json={"provider": "openai", "api_key": ""},
+    )
+    # Should succeed using the stored key, not fail with "no key provided".
+    assert resp.status_code == 200
+    assert called_with.get("api_key") == "sk-stored"
