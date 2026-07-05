@@ -261,7 +261,9 @@ def register_intelligence_tools(mcp: FastMCP, client: BuildiumClient) -> None:
                     cdate = m.parse_date(charge.get("Date") or charge.get("TransactionDate"))
                     if cdate is None or cdate < window_start or cdate > as_of:
                         continue
-                    posted = round(posted + m.money(charge.get("Amount") or charge.get("TotalAmount")), m.CENTS)
+                    posted = round(
+                        posted + m.money(charge.get("Amount") or charge.get("TotalAmount")), m.CENTS
+                    )
 
                 min_expected = round(expected * max(0.0, (100.0 - tolerance_pct)) / 100.0, m.CENTS)
                 if posted < min_expected:
@@ -373,7 +375,14 @@ def register_intelligence_tools(mcp: FastMCP, client: BuildiumClient) -> None:
                     fmt,
                     filename="concession_drift",
                     title="Concession Drift Analyzer",
-                    columns=["Lease", "Property", "Unit", "Current Rent", "Market Rent", "Discount %"],
+                    columns=[
+                        "Lease",
+                        "Property",
+                        "Unit",
+                        "Current Rent",
+                        "Market Rent",
+                        "Discount %",
+                    ],
                     rows=rows,
                 )
             return result
@@ -447,13 +456,16 @@ def register_intelligence_tools(mcp: FastMCP, client: BuildiumClient) -> None:
 
         async def _run() -> dict[str, Any]:
             units = await c.paginate_all(
-                lambda limit, offset: client.rental_units_api.external_api_rental_units_get_all_rental_units(  # noqa: E501
+                lambda limit,
+                offset: client.rental_units_api.external_api_rental_units_get_all_rental_units(  # noqa: E501
                     limit=limit, offset=offset
                 )
             )
             active = await _leases_by_status(client, "Active")
             past = await _leases_by_status(client, "Past")
-            active_units = {_lease_unit_id(lease) for lease in active if _lease_unit_id(lease) is not None}
+            active_units = {
+                _lease_unit_id(lease) for lease in active if _lease_unit_id(lease) is not None
+            }
             last_end_by_unit: dict[Any, date] = {}
             for lease in past:
                 unit_id = _lease_unit_id(lease)
@@ -493,7 +505,9 @@ def register_intelligence_tools(mcp: FastMCP, client: BuildiumClient) -> None:
             as_of = date.today()
             balances = await _outstanding_balances(client)
             balance_by_lease = {
-                row.get("LeaseId"): m.money(row.get("TotalBalance")) for row in balances if row.get("LeaseId")
+                row.get("LeaseId"): m.money(row.get("TotalBalance"))
+                for row in balances
+                if row.get("LeaseId")
             }
             leases = await _leases_by_status(client, "Active")
             scored: list[dict[str, Any]] = []
@@ -534,7 +548,9 @@ def register_intelligence_tools(mcp: FastMCP, client: BuildiumClient) -> None:
             return {
                 "horizon_days": int(horizon_days),
                 "high_risk_min_score": float(high_risk_min_score),
-                "high_risk_count": len([r for r in scored if r["risk_score"] >= high_risk_min_score]),
+                "high_risk_count": len(
+                    [r for r in scored if r["risk_score"] >= high_risk_min_score]
+                ),
                 "rows": scored,
             }
 
@@ -548,7 +564,8 @@ def register_intelligence_tools(mcp: FastMCP, client: BuildiumClient) -> None:
 
         async def _run() -> dict[str, Any]:
             owners = await c.paginate_all(
-                lambda limit, offset: client.rental_owners_api.external_api_rental_owners_get_rental_owners(  # noqa: E501
+                lambda limit,
+                offset: client.rental_owners_api.external_api_rental_owners_get_rental_owners(  # noqa: E501
                     limit=limit, offset=offset
                 )
             )
@@ -561,7 +578,8 @@ def register_intelligence_tools(mcp: FastMCP, client: BuildiumClient) -> None:
                         delinquency_by_property[prop] + m.money(row.get("TotalBalance")), m.CENTS
                     )
             accounts = await c.paginate_all(
-                lambda limit, offset: client.bank_accounts_api.external_api_bank_accounts_get_all_bank_accounts(  # noqa: E501
+                lambda limit,
+                offset: client.bank_accounts_api.external_api_bank_accounts_get_all_bank_accounts(  # noqa: E501
                     limit=limit, offset=offset
                 )
             )
@@ -580,7 +598,9 @@ def register_intelligence_tools(mcp: FastMCP, client: BuildiumClient) -> None:
                 # Buildium owner records may not expose a full property map in all accounts,
                 # so use a conservative portfolio-share approximation for risk surfacing.
                 delinquency_estimate = avg_delinquency
-                reserve_pressure = max(0.0, float(min_reserve_balance) - reserve_total / owner_count)
+                reserve_pressure = max(
+                    0.0, float(min_reserve_balance) - reserve_total / owner_count
+                )
                 owner_rows.append(
                     {
                         "owner_id": oid,
@@ -615,7 +635,9 @@ def register_intelligence_tools(mcp: FastMCP, client: BuildiumClient) -> None:
             counts: dict[Any, int] = defaultdict(int)
             for status in _OPEN_WORK_ORDER_STATUSES:
                 rows = await c.paginate_all(
-                    lambda limit, offset, _status=status: client.work_orders_api.external_api_work_orders_get_all_work_orders(  # noqa: E501
+                    lambda limit,
+                    offset,
+                    _status=status: client.work_orders_api.external_api_work_orders_get_all_work_orders(  # noqa: E501
                         statuses=[_status], limit=limit, offset=offset
                     )
                 )
@@ -718,7 +740,8 @@ def register_intelligence_tools(mcp: FastMCP, client: BuildiumClient) -> None:
             balances = await _outstanding_balances(client)
             severe = [row for row in balances if m.money(row.get("TotalBalance")) >= 1500]
             work_orders = await c.paginate_all(
-                lambda limit, offset: client.work_orders_api.external_api_work_orders_get_all_work_orders(
+                lambda limit,
+                offset: client.work_orders_api.external_api_work_orders_get_all_work_orders(
                     statuses=list(_OPEN_WORK_ORDER_STATUSES), limit=limit, offset=offset
                 )
             )
@@ -750,17 +773,14 @@ def register_intelligence_tools(mcp: FastMCP, client: BuildiumClient) -> None:
         async def _run() -> dict[str, Any]:
             balances = await _outstanding_balances(client)
             reserve_accounts = await c.paginate_all(
-                lambda limit, offset: client.bank_accounts_api.external_api_bank_accounts_get_all_bank_accounts(
+                lambda limit,
+                offset: client.bank_accounts_api.external_api_bank_accounts_get_all_bank_accounts(
                     limit=limit, offset=offset
                 )
             )
             delinquent = len([row for row in balances if m.money(row.get("TotalBalance")) > 0])
             reserve_breaches = len(
-                [
-                    account
-                    for account in reserve_accounts
-                    if _account_balance(account) < 1000
-                ]
+                [account for account in reserve_accounts if _account_balance(account) < 1000]
             )
             digest = (
                 f"EOD exceptions {as_of.isoformat()}: {delinquent} delinquent lease(s), "
@@ -798,7 +818,8 @@ def register_intelligence_tools(mcp: FastMCP, client: BuildiumClient) -> None:
         async def _run() -> dict[str, Any]:
             balances = await _outstanding_balances(client)
             work_orders = await c.paginate_all(
-                lambda limit, offset: client.work_orders_api.external_api_work_orders_get_all_work_orders(
+                lambda limit,
+                offset: client.work_orders_api.external_api_work_orders_get_all_work_orders(
                     statuses=list(_OPEN_WORK_ORDER_STATUSES), limit=limit, offset=offset
                 )
             )
@@ -812,7 +833,9 @@ def register_intelligence_tools(mcp: FastMCP, client: BuildiumClient) -> None:
                 feed = {
                     "headline": "PM priorities",
                     "work_order_priorities": priorities,
-                    "lease_attention_count": len([b for b in balances if m.money(b.get("TotalBalance")) > 0]),
+                    "lease_attention_count": len(
+                        [b for b in balances if m.money(b.get("TotalBalance")) > 0]
+                    ),
                 }
             elif selected_role == "accounting":
                 feed = {
@@ -861,8 +884,14 @@ def register_intelligence_tools(mcp: FastMCP, client: BuildiumClient) -> None:
                 current_balance = m.money(row.get("TotalBalance"))
                 if lease_id is None or current_balance < float(min_shift_amount):
                     continue
-                baseline = {"historical_avg_balance": float(min_shift_amount), "lookback_months": int(lookback_months)}
-                delta = {"current_balance": current_balance, "difference": round(current_balance - float(min_shift_amount), m.CENTS)}
+                baseline = {
+                    "historical_avg_balance": float(min_shift_amount),
+                    "lookback_months": int(lookback_months),
+                }
+                delta = {
+                    "current_balance": current_balance,
+                    "difference": round(current_balance - float(min_shift_amount), m.CENTS),
+                }
                 score = min(100.0, 40 + (current_balance / 50.0))
                 signals.append(
                     _signal(
@@ -938,11 +967,7 @@ def register_intelligence_tools(mcp: FastMCP, client: BuildiumClient) -> None:
                     limit=limit, offset=offset
                 )
             )
-            amounts = [
-                _bill_amount(bill)
-                for bill in bills
-                if _bill_amount(bill) > 0
-            ]
+            amounts = [_bill_amount(bill) for bill in bills if _bill_amount(bill) > 0]
             baseline_avg = round(mean(amounts), m.CENTS) if amounts else 0.0
             signals: list[dict[str, Any]] = []
             if baseline_avg <= 0:
@@ -990,7 +1015,9 @@ def register_intelligence_tools(mcp: FastMCP, client: BuildiumClient) -> None:
             work_orders: list[dict[str, Any]] = []
             for status in _ALL_WORK_ORDER_STATUSES:
                 rows = await c.paginate_all(
-                    lambda limit, offset, _status=status: client.work_orders_api.external_api_work_orders_get_all_work_orders(  # noqa: E501
+                    lambda limit,
+                    offset,
+                    _status=status: client.work_orders_api.external_api_work_orders_get_all_work_orders(  # noqa: E501
                         statuses=[_status], limit=limit, offset=offset
                     )
                 )
@@ -1008,7 +1035,10 @@ def register_intelligence_tools(mcp: FastMCP, client: BuildiumClient) -> None:
                         score=min(100.0, 40 + age * 1.5),
                         confidence=0.7,
                         baseline={"cycle_time_days_threshold": int(cycle_time_days_threshold)},
-                        delta={"age_days": age, "excess_days": age - int(cycle_time_days_threshold)},
+                        delta={
+                            "age_days": age,
+                            "excess_days": age - int(cycle_time_days_threshold),
+                        },
                         why_flagged="Work order cycle time exceeds expected operational threshold.",
                         recommendation="Escalate assignment and investigate contractor/resource constraints.",
                         source_records=[
@@ -1016,7 +1046,8 @@ def register_intelligence_tools(mcp: FastMCP, client: BuildiumClient) -> None:
                                 "type": "work_order",
                                 "work_order_id": wo.get("Id"),
                                 "status": wo.get("Status"),
-                                "property_id": (wo.get("Property") or {}).get("Id") or wo.get("PropertyId"),
+                                "property_id": (wo.get("Property") or {}).get("Id")
+                                or wo.get("PropertyId"),
                             }
                         ],
                     )
@@ -1035,13 +1066,16 @@ def register_intelligence_tools(mcp: FastMCP, client: BuildiumClient) -> None:
 
         async def _run() -> dict[str, Any]:
             units = await c.paginate_all(
-                lambda limit, offset: client.rental_units_api.external_api_rental_units_get_all_rental_units(
+                lambda limit,
+                offset: client.rental_units_api.external_api_rental_units_get_all_rental_units(
                     limit=limit, offset=offset
                 )
             )
             active = await _leases_by_status(client, "Active")
             past = await _leases_by_status(client, "Past")
-            active_units = {_lease_unit_id(lease) for lease in active if _lease_unit_id(lease) is not None}
+            active_units = {
+                _lease_unit_id(lease) for lease in active if _lease_unit_id(lease) is not None
+            }
             last_end_by_unit: dict[Any, date] = {}
             for lease in past:
                 unit_id = _lease_unit_id(lease)
@@ -1067,7 +1101,10 @@ def register_intelligence_tools(mcp: FastMCP, client: BuildiumClient) -> None:
                         score=min(100.0, 30 + days_vacant),
                         confidence=0.76,
                         baseline={"vacancy_days_threshold": int(vacancy_days_threshold)},
-                        delta={"days_vacant": days_vacant, "excess_days": days_vacant - int(vacancy_days_threshold)},
+                        delta={
+                            "days_vacant": days_vacant,
+                            "excess_days": days_vacant - int(vacancy_days_threshold),
+                        },
                         why_flagged="Unit has remained vacant beyond expected turnover window.",
                         recommendation="Review pricing/marketing and prioritize make-ready tasks.",
                         source_records=[
@@ -1091,7 +1128,9 @@ def register_intelligence_tools(mcp: FastMCP, client: BuildiumClient) -> None:
         async def _run() -> dict[str, Any]:
             leases = await _leases_by_status(client, "Active")
             balances = await _outstanding_balances(client)
-            balance_by_lease = {row.get("LeaseId"): m.money(row.get("TotalBalance")) for row in balances}
+            balance_by_lease = {
+                row.get("LeaseId"): m.money(row.get("TotalBalance")) for row in balances
+            }
             anomalies: list[dict[str, Any]] = []
             for lease in leases:
                 lease_id = _lease_id(lease)

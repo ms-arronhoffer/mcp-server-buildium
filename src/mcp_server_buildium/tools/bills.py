@@ -67,7 +67,9 @@ def register_bill_tools(mcp: FastMCP, client: BuildiumClient) -> None:
             "bill_post_message",
             "BillPostMessage",
             bill_data,
-            lambda message: client.bills_api.external_api_bills_create_bill(bill_post_message=message),
+            lambda message: client.bills_api.external_api_bills_create_bill(
+                bill_post_message=message
+            ),
         )
 
     @mcp.tool()

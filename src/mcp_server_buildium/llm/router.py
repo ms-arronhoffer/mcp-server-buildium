@@ -255,8 +255,7 @@ class ModelRouter(LLMProvider):
             return completion
 
         raise RuntimeError(
-            f"All {len(ordered)} configured router providers failed. "
-            f"Last error: {last_exc}"
+            f"All {len(ordered)} configured router providers failed. Last error: {last_exc}"
         )
 
     def _pick_ordered(self, messages: list[Message]) -> tuple[list[RouterEntry], str]:

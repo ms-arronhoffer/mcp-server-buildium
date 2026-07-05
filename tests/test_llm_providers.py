@@ -267,9 +267,7 @@ def test_gemini_contents_echoes_thought_signature() -> None:
         {
             "role": "assistant",
             "content": None,
-            "tool_calls": [
-                ToolCall("c1", "list_leases", {"a": 1}, thought_signature="sig-abc")
-            ],
+            "tool_calls": [ToolCall("c1", "list_leases", {"a": 1}, thought_signature="sig-abc")],
         },
     ]
     _system, contents = gemini_contents(conversation)

@@ -425,19 +425,14 @@ class BuildiumConfig(BaseSettings):
         """Validate BUILDIUM_LLM_ROUTER_PROVIDERS and related router settings."""
         if not (self.llm_router_providers and self.llm_router_providers.strip()):
             raise ValueError(
-                "BUILDIUM_LLM_ROUTER_PROVIDERS is required when "
-                "BUILDIUM_LLM_ROUTER_ENABLED=true"
+                "BUILDIUM_LLM_ROUTER_PROVIDERS is required when BUILDIUM_LLM_ROUTER_ENABLED=true"
             )
         try:
             entries = json.loads(self.llm_router_providers)
         except (ValueError, TypeError) as exc:
-            raise ValueError(
-                "BUILDIUM_LLM_ROUTER_PROVIDERS must be a valid JSON array"
-            ) from exc
+            raise ValueError("BUILDIUM_LLM_ROUTER_PROVIDERS must be a valid JSON array") from exc
         if not isinstance(entries, list) or not entries:
-            raise ValueError(
-                "BUILDIUM_LLM_ROUTER_PROVIDERS must be a non-empty JSON array"
-            )
+            raise ValueError("BUILDIUM_LLM_ROUTER_PROVIDERS must be a non-empty JSON array")
         _key_map = {
             "openai": self.llm_openai_api_key,
             "anthropic": self.llm_anthropic_api_key,
@@ -445,11 +440,12 @@ class BuildiumConfig(BaseSettings):
         }
         for i, entry in enumerate(entries):
             if not isinstance(entry, dict):
-                raise ValueError(
-                    f"BUILDIUM_LLM_ROUTER_PROVIDERS[{i}] must be a JSON object"
-                )
+                raise ValueError(f"BUILDIUM_LLM_ROUTER_PROVIDERS[{i}] must be a JSON object")
             raw_provider = entry.get("provider", "")
-            if not isinstance(raw_provider, str) or raw_provider.strip().lower() not in LLM_PROVIDERS:
+            if (
+                not isinstance(raw_provider, str)
+                or raw_provider.strip().lower() not in LLM_PROVIDERS
+            ):
                 raise ValueError(
                     f"BUILDIUM_LLM_ROUTER_PROVIDERS[{i}].provider must be one of "
                     f"{sorted(LLM_PROVIDERS)}, got {raw_provider!r}"

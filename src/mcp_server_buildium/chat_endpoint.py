@@ -165,9 +165,7 @@ def register_chat_routes(
                 {"provider": e["provider"], "model": e["model"]}
                 for e in (config.get_llm_router_providers() or [])
             ]
-            capabilities["strategy"] = (
-                config.llm_router_strategy or "classifier"
-            ).strip().lower()
+            capabilities["strategy"] = (config.llm_router_strategy or "classifier").strip().lower()
         return JSONResponse(capabilities)
 
     @mcp.custom_route(CHAT_PATH, methods=["POST"])

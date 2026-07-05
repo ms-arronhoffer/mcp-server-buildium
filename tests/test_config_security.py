@@ -67,9 +67,7 @@ def test_role_policy_map_unset_returns_none() -> None:
 
 
 def test_role_policy_map_parsed_and_normalized() -> None:
-    cfg = _cfg(
-        entra_role_policy_map='{"Buildium.Admin":"Admin","Buildium.ReadOnly":"readonly"}'
-    )
+    cfg = _cfg(entra_role_policy_map='{"Buildium.Admin":"Admin","Buildium.ReadOnly":"readonly"}')
     assert cfg.get_entra_role_policy_map() == {
         "Buildium.Admin": "admin",
         "Buildium.ReadOnly": "readonly",

@@ -53,7 +53,9 @@ class _UnitsApi:
     def __init__(self, units: list[dict[str, Any]]) -> None:
         self._units = units
 
-    async def external_api_rental_units_get_all_rental_units(self, **kwargs: Any) -> list[dict[str, Any]]:
+    async def external_api_rental_units_get_all_rental_units(
+        self, **kwargs: Any
+    ) -> list[dict[str, Any]]:
         return self._units if kwargs.get("offset", 0) == 0 else []
 
 
@@ -61,7 +63,9 @@ class _WorkOrdersApi:
     def __init__(self, work_orders: list[dict[str, Any]]) -> None:
         self._work_orders = work_orders
 
-    async def external_api_work_orders_get_all_work_orders(self, **kwargs: Any) -> list[dict[str, Any]]:
+    async def external_api_work_orders_get_all_work_orders(
+        self, **kwargs: Any
+    ) -> list[dict[str, Any]]:
         statuses = kwargs.get("statuses")
         rows = self._work_orders
         if statuses:
@@ -81,7 +85,9 @@ class _OwnersApi:
     def __init__(self, owners: list[dict[str, Any]]) -> None:
         self._owners = owners
 
-    async def external_api_rental_owners_get_rental_owners(self, **kwargs: Any) -> list[dict[str, Any]]:
+    async def external_api_rental_owners_get_rental_owners(
+        self, **kwargs: Any
+    ) -> list[dict[str, Any]]:
         return self._owners if kwargs.get("offset", 0) == 0 else []
 
 
@@ -89,7 +95,9 @@ class _BankAccountsApi:
     def __init__(self, accounts: list[dict[str, Any]]) -> None:
         self._accounts = accounts
 
-    async def external_api_bank_accounts_get_all_bank_accounts(self, **kwargs: Any) -> list[dict[str, Any]]:
+    async def external_api_bank_accounts_get_all_bank_accounts(
+        self, **kwargs: Any
+    ) -> list[dict[str, Any]]:
         return self._accounts if kwargs.get("offset", 0) == 0 else []
 
 
@@ -108,7 +116,9 @@ class _Client:
 async def test_missing_charge_detector_finds_gap() -> None:
     leases = {"Active": [{"Id": 1, "PropertyId": 10, "UnitId": 100, "Rent": 1200.0}]}
     charges = {1: [{"Id": 99, "Date": "2026-07-01", "Amount": 200.0}]}
-    client = _Client(leases_api=_LeasesApi(leases), lease_transactions_api=_LeaseTxnApi(charges=charges))
+    client = _Client(
+        leases_api=_LeasesApi(leases), lease_transactions_api=_LeaseTxnApi(charges=charges)
+    )
     tool = await _get_tool(client, "missing_charge_detector")
     result = await tool.fn(as_of_date="2026-07-10", lookback_days=30)
     assert result["error"] is None
@@ -132,7 +142,11 @@ async def test_concession_drift_analyzer_flags_under_market() -> None:
 
 @pytest.mark.asyncio
 async def test_security_deposit_exposure_report_flags_shortfall() -> None:
-    leases = {"Active": [{"Id": 21, "PropertyId": 8, "UnitId": 3, "Rent": 1500.0, "SecurityDeposit": 500.0}]}
+    leases = {
+        "Active": [
+            {"Id": 21, "PropertyId": 8, "UnitId": 3, "Rent": 1500.0, "SecurityDeposit": 500.0}
+        ]
+    }
     client = _Client(leases_api=_LeasesApi(leases), lease_transactions_api=_LeaseTxnApi())
     tool = await _get_tool(client, "security_deposit_exposure_report")
     result = await tool.fn(required_deposit_months=1.0)
@@ -147,7 +161,9 @@ async def test_work_order_sla_bottleneck_report_counts_breaches() -> None:
         {"Id": 1, "Status": "New", "CreatedDate": "2026-06-01", "PropertyId": 10},
         {"Id": 2, "Status": "InProgress", "CreatedDate": "2026-07-09", "PropertyId": 10},
     ]
-    client = _Client(work_orders_api=_WorkOrdersApi(work_orders), lease_transactions_api=_LeaseTxnApi())
+    client = _Client(
+        work_orders_api=_WorkOrdersApi(work_orders), lease_transactions_api=_LeaseTxnApi()
+    )
     tool = await _get_tool(client, "work_order_sla_bottleneck_report")
     result = await tool.fn(as_of_date="2026-07-10", sla_days=7)
     assert result["error"] is None
@@ -184,7 +200,17 @@ async def test_rent_payment_behavior_shift_anomaly_has_explainability_fields() -
     result = await tool.fn(min_shift_amount=200)
     assert result["error"] is None
     signal = result["data"]["signals"][0]
-    assert set(["score", "confidence", "baseline", "delta", "why_flagged", "recommendation", "source_records"]).issubset(signal.keys())
+    assert set(
+        [
+            "score",
+            "confidence",
+            "baseline",
+            "delta",
+            "why_flagged",
+            "recommendation",
+            "source_records",
+        ]
+    ).issubset(signal.keys())
 
 
 @pytest.mark.asyncio
@@ -209,7 +235,9 @@ async def test_vacancy_duration_anomaly_flags_long_vacancy() -> None:
 async def test_data_quality_anomaly_scan_detects_missing_links() -> None:
     leases = {"Active": [{"Id": 99, "PropertyId": 10, "Rent": 0.0}]}
     balances = []
-    client = _Client(leases_api=_LeasesApi(leases), lease_transactions_api=_LeaseTxnApi(balances=balances))
+    client = _Client(
+        leases_api=_LeasesApi(leases), lease_transactions_api=_LeaseTxnApi(balances=balances)
+    )
     tool = await _get_tool(client, "data_quality_anomaly_scan")
     result = await tool.fn()
     assert result["error"] is None
