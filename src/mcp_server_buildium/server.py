@@ -214,6 +214,42 @@ def _build_cors_middleware() -> list:
     return middleware
 
 
+# Hosts that only accept connections from the local machine. Binding to one of
+# these under the HTTP transport makes the server unreachable from other devices
+# on the network (a LAN browser or the extension gets ERR_CONNECTION_REFUSED).
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+
+
+def _log_http_startup_diagnostics() -> None:
+    """Log actionable warnings about common HTTP-transport misconfigurations.
+
+    Emitted only for the HTTP transport, right before the server binds. These
+    messages explain two frequent symptoms:
+
+    * ``ERR_CONNECTION_REFUSED`` from a LAN browser/the extension — caused by
+      binding to a loopback-only host (the default ``127.0.0.1``).
+    * The extension's admin panel and the ``/manage`` page staying hidden/inert
+      (HTTP 503) — caused by ``BUILDIUM_MANAGEMENT_ENABLED`` being unset.
+    """
+    if config.host.strip().lower() in _LOOPBACK_HOSTS:
+        logger.warning(
+            "HTTP transport is bound to loopback host %r: only this machine can "
+            "connect. Other devices on your network (a LAN browser or the "
+            "extension) will get ERR_CONNECTION_REFUSED. Set BUILDIUM_HOST=0.0.0.0 "
+            "(or a specific LAN IP) to accept remote connections.",
+            config.host,
+        )
+    if config.management_active():
+        logger.info("Admin management routes active (GET /manage/ serves the admin UI).")
+    else:
+        logger.info(
+            "Admin management routes are disabled: GET /manage returns HTTP 503 and "
+            "the extension's admin panel stays hidden. Set "
+            "BUILDIUM_MANAGEMENT_ENABLED=true (plus the Microsoft Graph and Entra "
+            "role settings) to enable them."
+        )
+
+
 @mcp.tool()
 async def audit_summary(limit: int = 500) -> dict[str, Any]:
     """Summarize recent audit activity (admin only).
@@ -250,6 +286,7 @@ def main() -> None:
             config.port,
             config.mcp_path,
         )
+        _log_http_startup_diagnostics()
         mcp.run(
             transport="http",
             host=config.host,
