@@ -275,6 +275,13 @@ BUILDIUM_LLM_CONFIG_PATH=llm_config.json         # where the admin-UI config is 
 BUILDIUM_LLM_STORE_KEY=<base64-fernet-key>       # encrypts stored API keys at rest
 ```
 
+> **Persisting the config store in Docker.** The `mcp-server-http` service in
+> `docker-compose.yml` mounts a named `buildium-data` volume at `/app/data` and
+> defaults `BUILDIUM_LLM_CONFIG_PATH` to `/app/data/llm_config.json`, so
+> providers/models/keys configured through `/manage/` survive `docker compose up`
+> rebuilds and container recreation. Point the file audit sink
+> (`BUILDIUM_AUDIT_FILE`) at `/app/data` too if you want audit logs to persist.
+
 The `BUILDIUM_LLM_*` environment variables below are **deprecated** but still
 honoured for a one-time migration: if the config store file does not yet exist,
 the server seeds it from these values on first use (a `DeprecationWarning` is

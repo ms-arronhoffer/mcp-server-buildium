@@ -37,6 +37,11 @@ COPY --from=builder --chown=app:app /app/.venv /app/.venv
 COPY --chown=app:app src ./src
 COPY --chown=app:app pyproject.toml README.md ./
 
+# Directory for persistent state (e.g. the admin-UI LLM config store and the
+# optional file audit sink). Owned by `app` so that a fresh named/bind volume
+# mounted here inherits app ownership and stays writable by the non-root user.
+RUN mkdir -p /app/data && chown app:app /app/data
+
 USER app
 
 # STDIO transport MCP server.
