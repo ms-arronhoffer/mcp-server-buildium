@@ -1,12 +1,16 @@
 """Lease management tools for Buildium."""
 
 import inspect
+import logging
 from typing import Any
 
 from fastmcp import FastMCP
 
 from ..buildium_client import BuildiumClient
+from ..logging_config import get_logger, log_event
 from . import _common as c
+
+logger = get_logger("mcp_server_buildium.tools.leases")
 
 try:
     from mcp_server_buildium.buildium_sdk.models.lease_put_message import LeasePutMessage
@@ -46,7 +50,14 @@ async def _resolve_property_name(
         if isinstance(prop, dict):
             resolved = prop.get("Name")
             name = resolved if isinstance(resolved, str) and resolved.strip() else None
-    except Exception:  # noqa: BLE001 - enrichment is best-effort, never fatal
+    except Exception as exc:  # noqa: BLE001 - enrichment is best-effort, never fatal
+        log_event(
+            logger,
+            logging.DEBUG,
+            "lease.property_name_lookup_failed",
+            property_id=property_id,
+            error=type(exc).__name__,
+        )
         name = None
     cache[property_id] = name
     return name
