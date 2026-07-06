@@ -461,6 +461,35 @@ def test_route_downloads_chrome_extension(manage_client) -> None:
 def test_route_download_missing_firefox_is_503(manage_client) -> None:
     resp = manage_client.get("/manage/extension?browser=firefox", headers=_auth("admin-token"))
     assert resp.status_code == 503
+    # Firefox is not configured at all in the manage_client fixture.
+    assert "No prebuilt firefox extension is configured" in resp.json()["error"]
+
+
+def test_route_download_configured_but_missing_reports_path(monkeypatch, tmp_path) -> None:
+    """A configured-but-missing archive returns 503 naming the resolved path."""
+    from fastmcp import FastMCP
+    from starlette.testclient import TestClient
+
+    from mcp_server_buildium import management_endpoint
+
+    missing = tmp_path / "buildium-mcp-sidebar-chrome.zip"  # never created
+    cfg = _cfg(
+        entra_role_policy_map=ROLE_MAP,
+        management_enabled=True,
+        management_extension_chrome_path=str(missing),
+    )
+    verifier = _StubVerifier({"admin-token": {"roles": ["Buildium.Admin"]}})
+    monkeypatch.setattr(management_endpoint, "GraphClient", _StubGraph)
+
+    mcp = FastMCP("test")
+    management_endpoint.register_management_routes(mcp, cfg, verifier, None)
+    app = mcp.http_app(path="/mcp")
+    with TestClient(app) as tc:
+        resp = tc.get("/manage/extension?browser=chrome", headers=_auth("admin-token"))
+    assert resp.status_code == 503
+    error = resp.json()["error"]
+    assert str(missing) in error
+    assert "BUILDIUM_MANAGEMENT_EXTENSION_CHROME_PATH" in error
 
 
 # ---------------------------------------------------------------------------

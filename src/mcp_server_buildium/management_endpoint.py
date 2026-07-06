@@ -351,10 +351,35 @@ def register_management_routes(
                 status_code=400,
             )
         path = config.get_management_extension_path(browser)
-        if not path or not os.path.isfile(path):
+        if not path:
             _audit("manage_download_extension", "read", "error", args={"browser": browser})
             return JSONResponse(
                 {"error": f"No prebuilt {browser} extension is configured on this server."},
+                status_code=503,
+            )
+        if not os.path.isfile(path):
+            # The path is configured but points at a missing file. Surface the
+            # resolved absolute path so the operator can see exactly where the
+            # server looked (a common cause is a relative path resolved against
+            # an unexpected working directory).
+            resolved = os.path.abspath(path)
+            _audit(
+                "manage_download_extension",
+                "read",
+                "error",
+                args={"browser": browser, "path": resolved},
+            )
+            return JSONResponse(
+                {
+                    "error": (
+                        f"The configured {browser} extension archive was not found on "
+                        f"the server at '{resolved}'. Build and package the archive, "
+                        "then point the "
+                        f"BUILDIUM_MANAGEMENT_EXTENSION_{browser.upper()}_PATH "
+                        "environment variable at an existing file (an absolute path "
+                        "is recommended)."
+                    )
+                },
                 status_code=503,
             )
         content_type, filename = _EXTENSION_META[browser]
