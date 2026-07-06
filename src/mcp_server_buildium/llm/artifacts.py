@@ -1523,7 +1523,7 @@ def _char_width(ch: str, *, bold: bool) -> int:
     cp = ord(ch)
     if 32 <= cp <= 126:
         return (_HELV_BOLD_W if bold else _HELV_W)[cp - 32]
-    return 600  # reasonable average for anything outside printable ASCII
+    return 600  # ~average Helvetica advance for non-ASCII glyphs (close enough for layout)
 
 
 def _text_width(text: str, size: float, *, bold: bool = False) -> float:
