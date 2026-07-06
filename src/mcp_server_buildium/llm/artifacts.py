@@ -22,7 +22,10 @@ Design goals:
   themed, and can embed native charts (column/bar/line/pie) and tables; DOCX
   uses styled headings and a banded, colour-headed table; PDF renders a cover
   title, section copy, and a gridded table with a colour-filled header,
-  zebra-striped rows and right-aligned numeric columns.
+  zebra-striped rows and right-aligned numeric columns. A ``description``
+  renders as a contextual lead paragraph (PDF), subtitle (DOCX) or cover
+  subtitle (PPTX) so presentation formats are "board room ready" rather than a
+  bare data dump.
 * **Per-request registry.** A :class:`contextvars.ContextVar` holds the files
   generated during the current chat turn, mirroring ``current_attachments``.
 """
@@ -175,6 +178,7 @@ def build_generated_file(
     file_format: str,
     filename: str | None = None,
     title: str | None = None,
+    description: str | None = None,
     columns: list[str] | None = None,
     rows: list[list[object]] | None = None,
     sections: list[Section] | None = None,
@@ -187,6 +191,10 @@ def build_generated_file(
         filename: Desired base file name (extension is normalized to match the
             format). Defaults to a title/format-derived name.
         title: Optional document/spreadsheet/deck title.
+        description: Optional contextual summary rendered beneath the title as a
+            lead paragraph (PDF), subtitle (DOCX) or cover subtitle (PPTX). This
+            is what makes presentation formats "board room ready" — a short
+            paragraph explaining what the artifact shows and why it matters.
         columns: Header row for tabular formats (CSV, XLSX). Also rendered as a
             table in DOCX/PDF when present.
         rows: Data rows aligned to ``columns``.
@@ -208,17 +216,18 @@ def build_generated_file(
     rows = [[cell for cell in row] for row in (rows or [])]
     sections = sections or []
     slides = slides or []
+    description = (description or "").strip() or None
 
     if fmt == "csv":
         data = _build_csv(columns, rows)
     elif fmt == "xlsx":
         data = _build_xlsx(title, columns, rows)
     elif fmt == "docx":
-        data = _build_docx(title, sections, columns, rows)
+        data = _build_docx(title, description, sections, columns, rows)
     elif fmt == "pdf":
-        data = _build_pdf(title, sections, columns, rows)
+        data = _build_pdf(title, description, sections, columns, rows)
     else:  # pptx
-        data = _build_pptx(title, slides, columns, rows)
+        data = _build_pptx(title, description, slides, columns, rows)
 
     if len(data) > MAX_ARTIFACT_BYTES:
         raise ArtifactError(
@@ -527,17 +536,21 @@ def _docx_styles() -> str:
 
 def _build_docx(
     title: str | None,
+    description: str | None,
     sections: list[Section],
     columns: list[str],
     rows: list[list[object]],
 ) -> bytes:
     """Build a styled, professional DOCX (WordprocessingML) document."""
-    if not (title or sections or columns or rows):
+    if not (title or description or sections or columns or rows):
         raise ArtifactError("A document export needs a title, sections, or a table.")
 
     body: list[str] = []
     if title:
         body.append(_docx_paragraph(title, style="Title"))
+    if description:
+        for line in description.split("\n"):
+            body.append(_docx_paragraph(line, style="Subtitle"))
     for section in sections:
         if section.heading:
             body.append(_docx_paragraph(section.heading, style="Heading1"))
@@ -1034,6 +1047,7 @@ def _pptx_slide_shapes(slide: Slide, base_id: int) -> tuple[str, list[str]]:
 
 def _build_pptx(
     title: str | None,
+    description: str | None,
     slides: list[Slide],
     columns: list[str],
     rows: list[list[object]],
@@ -1043,11 +1057,29 @@ def _build_pptx(
     table_slide_index: int | None = None
     if not deck:
         # Derive slides from a title and/or a table when explicit slides are absent.
-        if title:
-            deck.append(Slide(title=title, subtitle="", layout="title"))
+        if title or description:
+            deck.append(
+                Slide(title=title or "Presentation", subtitle=description or "", layout="title")
+            )
         if columns or rows:
             table_slide_index = len(deck)
             deck.append(Slide(title="Data", bullets=[]))
+    elif description:
+        # Explicit slides were supplied: give them board-room context by leading
+        # with a cover slide that carries the deck's description, unless the deck
+        # already opens with a cover we can annotate.
+        first = deck[0]
+        if first.layout == "title" and not first.subtitle:
+            first.subtitle = description
+        else:
+            deck.insert(
+                0,
+                Slide(
+                    title=title or first.title or "Presentation",
+                    subtitle=description,
+                    layout="title",
+                ),
+            )
     if not deck:
         raise ArtifactError("A slide deck export needs 'slides', a title, or a table.")
 
@@ -1682,6 +1714,21 @@ class _PdfCanvas:
         )
         self.y = rule_y - 18
 
+    def draw_description(self, text: str) -> None:
+        """Draw a contextual lead paragraph in the secondary colour under the title."""
+        self.has_content = True
+        size = 11.5
+        leading = 16.0
+        for line in _wrap_width(text, _PDF_CONTENT_W, size, bold=False):
+            self._ensure(leading)
+            baseline = self.y - size
+            if line:
+                self._ops().append(
+                    _op_text(_PDF_MARGIN_L, baseline, line, b"F1", size, THEME_COLORS["dk2"])
+                )
+            self.y -= leading
+        self.y -= 8
+
     def draw_section(self, section: Section) -> None:
         if section.heading:
             self.has_content = True
@@ -1873,17 +1920,20 @@ class _PdfCanvas:
 
 def _build_pdf(
     title: str | None,
+    description: str | None,
     sections: list[Section],
     columns: list[str],
     rows: list[list[object]],
 ) -> bytes:
     """Build a styled, multi-page PDF (cover title, sections, real table)."""
-    if not (title or sections or columns or rows):
+    if not (title or description or sections or columns or rows):
         raise ArtifactError("A PDF export needs a title, sections, or a table.")
 
     canvas = _PdfCanvas()
     if title:
         canvas.draw_title(title)
+    if description:
+        canvas.draw_description(description)
     for section in sections:
         canvas.draw_section(section)
     if columns or rows:

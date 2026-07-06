@@ -251,6 +251,61 @@ def test_pdf_is_styled_with_colour_and_bold_font() -> None:
     assert b" rg" in gf.data  # fill-colour operator used for headings/shading
 
 
+def test_docx_renders_description_as_subtitle() -> None:
+    gf = build_generated_file(
+        file_format="docx",
+        title="Property Report",
+        description="Occupancy across the portfolio for Q2 2026.",
+        columns=COLUMNS,
+        rows=ROWS,
+    )
+    blob = _ooxml_text(gf.data)
+    assert "Occupancy across the portfolio for Q2 2026." in blob
+    assert 'w:val="Subtitle"' in blob
+
+
+def test_pdf_renders_description_context() -> None:
+    gf = build_generated_file(
+        file_format="pdf",
+        title="Report",
+        description="Board-room context for the numbers below.",
+        columns=COLUMNS,
+        rows=ROWS,
+    )
+    assert gf.data.startswith(b"%PDF-1.4")
+    assert b"Board-room context for the numbers below." in gf.data
+
+
+def test_pptx_description_becomes_cover_subtitle() -> None:
+    gf = build_generated_file(
+        file_format="pptx",
+        title="Deck",
+        description="Why occupancy improved this quarter.",
+        columns=COLUMNS,
+        rows=ROWS,
+    )
+    blob = _ooxml_text(gf.data)
+    assert "Why occupancy improved this quarter." in blob
+
+
+def test_pptx_description_prepends_cover_when_slides_given() -> None:
+    gf = build_generated_file(
+        file_format="pptx",
+        title="Deck",
+        description="Executive summary of the portfolio.",
+        slides=[Slide("Top Properties", ["Maple Court", "Oak Ridge"])],
+    )
+    blob = _ooxml_text(gf.data)
+    assert "Executive summary of the portfolio." in blob
+    assert "Top Properties" in blob
+
+
+def test_description_only_is_valid_content() -> None:
+    for fmt in ("pdf", "docx", "pptx"):
+        gf = build_generated_file(file_format=fmt, description="Standalone context.")
+        assert gf.size > 0
+
+
 def test_unsupported_format_raises() -> None:
     with pytest.raises(ArtifactError):
         build_generated_file(file_format="rtf", columns=COLUMNS, rows=ROWS)

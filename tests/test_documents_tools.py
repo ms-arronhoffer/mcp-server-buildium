@@ -271,6 +271,54 @@ def test_create_download_file_pptx_with_chart_and_layout() -> None:
         current_artifacts.reset(token)
 
 
+def test_create_download_file_pdf_requires_context() -> None:
+    """A bare table PDF is rejected so presentation formats stay board-room ready."""
+    _client, tools = _build_server()
+    token = set_current_artifacts()
+    try:
+        result = asyncio.run(
+            tools["create_download_file"].run(
+                {
+                    "file_format": "pdf",
+                    "title": "Report",
+                    "columns": ["Lease", "Rent"],
+                    "rows": [[1, 1225]],
+                }
+            )
+        )
+        err = _structured(result)["error"]
+        assert err["code"] == "validation_error"
+        assert "board-room ready" in err["message"]
+        assert get_current_artifacts() == []
+    finally:
+        current_artifacts.reset(token)
+
+
+def test_create_download_file_pdf_with_description_succeeds() -> None:
+    _client, tools = _build_server()
+    token = set_current_artifacts()
+    try:
+        result = asyncio.run(
+            tools["create_download_file"].run(
+                {
+                    "file_format": "pdf",
+                    "title": "Report",
+                    "description": "Q2 rent roll for the downtown portfolio.",
+                    "columns": ["Lease", "Rent"],
+                    "rows": [[1, 1225]],
+                }
+            )
+        )
+        data = _structured(result)["data"]
+        assert data["generated"] is True
+        assert data["format"] == "pdf"
+        artifacts = get_current_artifacts()
+        assert len(artifacts) == 1
+        assert b"Q2 rent roll for the downtown portfolio." in artifacts[0].data
+    finally:
+        current_artifacts.reset(token)
+
+
 def test_create_download_file_unsupported_format_errors() -> None:
     _client, tools = _build_server()
     token = set_current_artifacts()

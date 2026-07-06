@@ -332,6 +332,7 @@ def register_document_tools(mcp: FastMCP, client: BuildiumClient) -> None:
         file_format: str,
         filename: str | None = None,
         title: str | None = None,
+        description: str | None = None,
         columns: list[str] | None = None,
         rows: list[list[Any]] | None = None,
         sections: list[dict[str, Any]] | None = None,
@@ -346,15 +347,24 @@ def register_document_tools(mcp: FastMCP, client: BuildiumClient) -> None:
         file is returned to the user as a download link in the chat; you do not
         need to (and cannot) include the file contents in your reply.
 
+        Presentation formats (``pdf``, ``docx``, ``pptx``) must be **board-room
+        ready**: never emit a bare table with no context. Always pass a
+        ``description`` — a short paragraph explaining what the artifact shows and
+        why it matters — and/or narrative ``sections``/``slides``. The description
+        is rendered as a lead paragraph (PDF), subtitle (DOCX) or cover subtitle
+        (PPTX).
+
         Provide the content that fits the format:
 
         * Tabular formats (``csv``, ``xlsx``): supply ``columns`` (header names)
           and ``rows`` (each row a list of values aligned to the columns).
-        * Document formats (``docx``, ``pdf``): supply ``sections`` (a list of
-          ``{"heading", "body"}`` objects) and/or a ``columns``/``rows`` table.
-          Output is professionally styled (branded headings, a banded table).
-        * Slide decks (``pptx``): supply ``slides`` (a list of slide objects).
-          Each slide accepts ``{"title", "subtitle", "bullets": [..], "layout",
+        * Document formats (``docx``, ``pdf``): supply a ``description`` for
+          context, ``sections`` (a list of ``{"heading", "body"}`` objects)
+          and/or a ``columns``/``rows`` table. Output is professionally styled
+          (branded headings, a banded table).
+        * Slide decks (``pptx``): supply a ``description`` for the cover slide and
+          ``slides`` (a list of slide objects). Each slide accepts
+          ``{"title", "subtitle", "bullets": [..], "layout",
           "chart"}``. Set ``layout="title"`` for a cover slide. Add a ``chart``
           to visualize data instead of listing it as text, e.g.
           ``{"kind": "column"|"bar"|"line"|"pie", "title": "..",
@@ -368,6 +378,9 @@ def register_document_tools(mcp: FastMCP, client: BuildiumClient) -> None:
             file_format: One of ``csv``, ``xlsx``, ``docx``, ``pdf``, ``pptx``.
             filename: Optional base file name (the correct extension is added).
             title: Optional document/spreadsheet/deck title.
+            description: Contextual summary rendered under the title. Required for
+                ``pdf``/``docx``/``pptx`` unless ``sections``/``slides`` supply
+                the narrative context, so the artifact is board-room ready.
             columns: Header row for tabular content.
             rows: Data rows aligned to ``columns``.
             sections: Narrative sections for ``docx``/``pdf``.
@@ -381,11 +394,26 @@ def register_document_tools(mcp: FastMCP, client: BuildiumClient) -> None:
                 code="validation_error",
                 hint="Choose one of: csv, xlsx, docx, pdf, pptx.",
             )
+        description = (description or "").strip() or None
+        # Presentation formats must carry narrative context so they are
+        # board-room ready — reject a bare table with no description/sections/slides.
+        if fmt in ("pdf", "docx", "pptx") and not (description or sections or slides):
+            return c.failure(
+                f"A {fmt} must include context so it is board-room ready. "
+                "Provide a 'description' summarizing what the file shows"
+                + (" (and/or 'sections')." if fmt in ("pdf", "docx") else " (and/or 'slides')."),
+                code="validation_error",
+                hint=(
+                    "Add a short 'description' paragraph explaining the data and "
+                    "why it matters before generating the file."
+                ),
+            )
         try:
             generated = build_generated_file(
                 file_format=fmt,
                 filename=filename,
                 title=title,
+                description=description,
                 columns=columns,
                 rows=rows,
                 sections=_coerce_sections(sections),
