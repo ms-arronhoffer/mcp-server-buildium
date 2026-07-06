@@ -166,6 +166,18 @@ def test_lease_transactions_nested(tools, run):
     assert result["count"] >= 1
 
 
+def test_lease_reads_include_property_name(tools, run):
+    # A lease read model only carries PropertyId; the lease tools enrich each
+    # lease with a resolved PropertyName so the assistant can show the property
+    # name instead of a bare "property 4".
+    listed = _ok(run(tools["list_leases"].fn(limit=5)))
+    first = listed["data"][0]
+    assert first.get("PropertyName")
+    assert isinstance(first["PropertyName"], str)
+
+    single = _ok(run(tools["get_lease"].fn(lease_id=first["Id"])))
+    assert single["data"]["PropertyName"] == first["PropertyName"]
+
 def test_pagination_clamped(tools, run):
     # Requesting an oversized limit should be clamped, not error.
     result = _ok(run(tools["list_leases"].fn(limit=100000)))

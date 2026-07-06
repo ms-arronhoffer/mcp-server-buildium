@@ -103,6 +103,22 @@ describe("parseInline", () => {
     ]);
   });
 
+  it("keeps two levels of nested parentheses inside an action prompt", () => {
+    // Property names may themselves be parenthesised (e.g. injected PropertyName
+    // like "Riverside Commons (Bldg A)"), producing a doubly-nested prompt that
+    // must still be captured whole instead of leaking raw `action:` text.
+    const tokens = parseInline(
+      "[Lease 12](action:Show lease 12 (Riverside Commons (Bldg A)))",
+    );
+    expect(tokens).toEqual([
+      {
+        type: "action",
+        label: "Lease 12",
+        prompt: "Show lease 12 (Riverside Commons (Bldg A))",
+      },
+    ]);
+  });
+
   it("keeps unsafe link schemes as inert text", () => {
     // A javascript: URL must never become a clickable anchor/action.
     const tokens = parseInline("[x](javascript:alert(1))");
