@@ -162,6 +162,33 @@ describe("parseInline", () => {
     expect(tokens.some((t) => t.type === "link" || t.type === "action")).toBe(false);
     expect(tokens.map((t) => t.value).join("")).toContain("x");
   });
+
+  it("tolerates an unbalanced parenthesis in an action target", () => {
+    // A natural-language action prompt sometimes carries a stray '(' with no
+    // closing ')', e.g. a property qualifier the model forgot to close. The link
+    // must still render as a control instead of leaking the raw `[label](action:…)`
+    // markup to the user.
+    expect(parseInline("[X](action:Show details for property 2 (Bldg A)")).toEqual([
+      { type: "action", label: "X", prompt: "Show details for property 2 (Bldg A)" },
+    ]);
+    expect(parseInline("[Owner](action:Email owner (a@b.com)")).toEqual([
+      { type: "action", label: "Owner", prompt: "Email owner (a@b.com)" },
+    ]);
+  });
+
+  it("does not tolerate an unbalanced parenthesis for a non-renderable target", () => {
+    // Only recognised schemes justify swallowing an unbalanced target; ordinary
+    // prose such as `see [x](note` must be left as literal text.
+    expect(parseInline("see [x](note")).toEqual([{ type: "text", value: "see [x](note" }]);
+  });
+
+  it("captures a label nested more than two bracket levels deep", () => {
+    // The previous depth-limited grammar leaked labels with three or more levels
+    // of balanced brackets; the scanner has no fixed nesting limit.
+    expect(parseInline("[A [B [C [D]]]](action:Show A)")).toEqual([
+      { type: "action", label: "A [B [C [D]]]", prompt: "Show A" },
+    ]);
+  });
 });
 
 describe("parseMarkdown", () => {

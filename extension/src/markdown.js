@@ -17,7 +17,11 @@
  *
  * `parseInline` also repairs a few malformed action/link shapes the assistant
  * occasionally emits (e.g. `**[label]**(action:…)`) so they render as clickable
- * controls instead of leaking the raw `action:` markup to the user.
+ * controls instead of leaking the raw `action:` markup to the user. Links and
+ * action links are matched with a linear balanced-delimiter scanner (`scanLink`)
+ * rather than a regex, so labels/targets with arbitrarily deep nesting — and
+ * targets with an unbalanced trailing `(` — are captured whole instead of
+ * leaking, with no risk of catastrophic regex backtracking.
  */
 
 const ACTION_SCHEME = "action:";
@@ -68,6 +72,85 @@ function decodeAction(raw) {
   }
 }
 
+// Recognised link-target schemes, used by the scanner to decide whether an
+// *unbalanced* target (a stray `(` with no matching `)`) is worth tolerating.
+// Mirrors LINK_TARGET_SCHEME but as a real anchored regex.
+const RENDERABLE_SCHEME_RE = new RegExp(`^\\s*(?:${LINK_TARGET_SCHEME})`, "i");
+
+/**
+ * Scan a delimited, possibly-nested span starting at `open` and return the index
+ * just past its matching `close`, or -1 when the span is never closed. Depth is
+ * tracked so nested pairs (e.g. `[a [b] c]` or `(a (b) c)`) are matched whole,
+ * with no fixed nesting limit. Linear in the length scanned, so it cannot exhibit
+ * the catastrophic backtracking a nested-quantifier regex would on unbalanced
+ * input.
+ * @param {string} text
+ * @param {number} start index of the opening delimiter (`text[start] === open`)
+ * @param {string} open opening delimiter character
+ * @param {string} close closing delimiter character
+ * @returns {number} index just past the matching close, or -1 if unbalanced
+ */
+function scanBalanced(text, start, open, close) {
+  let depth = 0;
+  for (let i = start; i < text.length; i += 1) {
+    const ch = text[i];
+    if (ch === open) depth += 1;
+    else if (ch === close) {
+      depth -= 1;
+      if (depth === 0) return i + 1;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Attempt to parse a `[label](target)` link/action starting at `text[start]`
+ * (which must be `[`). Returns `{ len, token }` on success or `null` when the
+ * text at `start` is not a link.
+ *
+ * Unlike a regex, this scanner matches labels and targets with *unbounded*
+ * balanced nesting, and — for targets that use a scheme we render (`action:`,
+ * `http(s):`, `mailto:`) — tolerates an *unbalanced* trailing `(` by consuming
+ * to the end of the segment. That keeps a stray parenthesis in a natural-language
+ * action prompt (e.g. `action:Show property 2 (Bldg A`) from leaking the raw
+ * `[label](action:…)` markup to the user. Unsafe/unknown schemes are still
+ * rendered as inert text.
+ */
+function scanLink(text, start) {
+  if (text[start] !== "[") return null;
+  const labelEnd = scanBalanced(text, start, "[", "]"); // index past matching ']'
+  if (labelEnd < 0 || text[labelEnd] !== "(") return null;
+  const label = text.slice(start + 1, labelEnd - 1);
+
+  let target;
+  let end;
+  const targetClose = scanBalanced(text, labelEnd, "(", ")");
+  if (targetClose >= 0) {
+    target = text.slice(labelEnd + 1, targetClose - 1);
+    end = targetClose;
+  } else if (RENDERABLE_SCHEME_RE.test(text.slice(labelEnd + 1))) {
+    // Unbalanced target, but it clearly opens a renderable scheme: consume the
+    // rest so the control still renders instead of leaking raw markup. Gated on
+    // the scheme so ordinary prose like `see [x](note` is left untouched.
+    target = text.slice(labelEnd + 1);
+    end = text.length;
+  } else {
+    return null;
+  }
+
+  const href = target.trim();
+  let token;
+  if (href.toLowerCase().startsWith(ACTION_SCHEME)) {
+    token = { type: "action", label, prompt: decodeAction(href.slice(ACTION_SCHEME.length)) };
+  } else if (SAFE_LINK_RE.test(href)) {
+    token = { type: "link", label, href };
+  } else {
+    // Unsupported/unsafe scheme: keep the label as plain text (never a link).
+    token = { type: "text", value: label };
+  }
+  return { len: end - start, token };
+}
+
 /**
  * Parse a single line of inline Markdown into tokens.
  * @param {string} text
@@ -87,29 +170,6 @@ export function parseInline(text) {
   };
 
   const rules = [
-    {
-      // The label allows up to two levels of balanced square brackets and the
-      // target allows up to two levels of balanced parentheses, so
-      // natural-language labels/prompts like `[Unit 101 [Riverside Commons]]`
-      // or `action:Show lease 12 (Riverside Commons (Bldg A))` are captured
-      // whole instead of being truncated at the first `]`/`)`.
-      re: new RegExp(
-        `^\\[(${LABEL_INNER})\\]\\(((?:[^()]|\\((?:[^()]|\\([^()]*\\))*\\))*)\\)`,
-      ),
-      make: (m) => {
-        const href = m[2].trim();
-        if (href.toLowerCase().startsWith(ACTION_SCHEME)) {
-          return {
-            type: "action",
-            label: m[1],
-            prompt: decodeAction(href.slice(ACTION_SCHEME.length)),
-          };
-        }
-        if (SAFE_LINK_RE.test(href)) return { type: "link", label: m[1], href };
-        // Unsupported/unsafe scheme: keep the label as plain text.
-        return { type: "text", value: m[1] };
-      },
-    },
     // Bold content is parsed recursively so nested links/action links keep
     // working (the assistant often emits `**[Label](action:…)**`).
     { re: /^\*\*([^*]+)\*\*/, make: (m) => ({ type: "bold", children: parseInline(m[1]) }) },
@@ -119,11 +179,20 @@ export function parseInline(text) {
   while (i < text.length) {
     const rest = text.slice(i);
     let hit = null;
-    for (const rule of rules) {
-      const m = rule.re.exec(rest);
-      if (m) {
-        hit = { len: m[0].length, token: rule.make(m) };
-        break;
+    // Links/actions are scanned (not regex-matched) so labels and targets with
+    // arbitrarily deep balanced brackets/parens — and targets with an unbalanced
+    // trailing `(` — are captured whole instead of leaking the raw markup.
+    if (text[i] === "[") {
+      const link = scanLink(text, i);
+      if (link) hit = { len: link.len, token: link.token };
+    }
+    if (!hit) {
+      for (const rule of rules) {
+        const m = rule.re.exec(rest);
+        if (m) {
+          hit = { len: m[0].length, token: rule.make(m) };
+          break;
+        }
       }
     }
     if (hit) {
