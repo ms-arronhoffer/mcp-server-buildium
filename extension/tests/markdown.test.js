@@ -53,6 +53,37 @@ describe("parseInline", () => {
     ]);
   });
 
+  it("repairs a zero-width character wedged between an action label and its target", () => {
+    // Markdown-emitting models occasionally slip an *invisible* zero-width
+    // character (e.g. U+200B) between `]` and `(action:…)`. JS `\s` does not
+    // match it, so before the fix the link looked well-formed to the user yet
+    // leaked the raw `[label](action:…)` markup. Cover the common invisibles.
+    for (const zw of ["\u200b", "\u200c", "\u200d", "\u2060"]) {
+      expect(parseInline(`[Lease 12]${zw}(action:Show full details for lease 12)`)).toEqual([
+        { type: "action", label: "Lease 12", prompt: "Show full details for lease 12" },
+      ]);
+      // Same, but bold-wrapped, which is how table cells are usually emitted.
+      expect(
+        parseInline(`**[Lease 12]${zw}(action:Show full details for lease 12)**`),
+      ).toEqual([
+        {
+          type: "bold",
+          children: [
+            { type: "action", label: "Lease 12", prompt: "Show full details for lease 12" },
+          ],
+        },
+      ]);
+    }
+  });
+
+  it("strips a zero-width character hidden just inside the action target", () => {
+    // An invisible character immediately after `(` would otherwise hide the
+    // `action:` scheme and demote the control to inert text.
+    expect(parseInline("[Lease 12](\u200baction:Show full details for lease 12)")).toEqual([
+      { type: "action", label: "Lease 12", prompt: "Show full details for lease 12" },
+    ]);
+  });
+
   it("does not turn a split unsafe scheme into a link", () => {
     // Repairing malformed markup must never resurrect a `javascript:` target.
     const tokens = parseInline("**[x]** (javascript:alert(1))");

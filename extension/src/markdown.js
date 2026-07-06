@@ -40,6 +40,21 @@ const LINK_TARGET_SCHEME = "action:|https?:|mailto:";
 // parenthesis handling used for the link target.
 const LABEL_INNER = "(?:[^\\[\\]]|\\[(?:[^\\[\\]]|\\[[^\\[\\]]*\\])*\\])+";
 
+// Zero-width / invisible characters a Markdown-emitting model occasionally slips
+// between a link's `]` and its `(target)`. JavaScript's `\s` matches most Unicode
+// whitespace (including NBSP U+00A0 and the BOM U+FEFF) but NOT the zero-width
+// space (U+200B), zero-width non-joiner/joiner (U+200C/U+200D), or word joiner
+// (U+2060). Because such a character is invisible, `[Label]​(action:…)` looks
+// well-formed to the user yet breaks the `[label](target)` grammar and leaks the
+// raw `[label](action:…)` markup. They must therefore be treated as an allowed
+// (and stripped) gap between the label and its target.
+const ZERO_WIDTH = "\\u200b\\u200c\\u200d\\u2060";
+// Global matcher for the same invisible characters, used to scrub them out of a
+// resolved link target (URL or action prompt), where they carry no meaning.
+const ZERO_WIDTH_RE = new RegExp(`[${ZERO_WIDTH}]`, "g");
+// A whitespace-or-invisible separator that may appear between `]` and `(target)`.
+const LINK_GAP = `[\\s${ZERO_WIDTH}]`;
+
 /**
  * Repair link/action markup that the assistant sometimes emits in a shape that
  * breaks the `[label](target)` grammar, which would otherwise leak the raw
@@ -50,15 +65,19 @@ const LABEL_INNER = "(?:[^\\[\\]]|\\[(?:[^\\[\\]]|\\[[^\\[\\]]*\\])*\\])+";
  *  - `**[label]** (target)`  → `**[label](target)**`  (as above, with a space)
  *  - `[label] (target)`      → `[label](target)`        (stray space before target)
  *
+ * The separator between `]` and `(target)` may be ordinary whitespace *or* an
+ * invisible zero-width character (see `ZERO_WIDTH`); both are collapsed so an
+ * unseen character can't leak the raw markup.
+ *
  * Only targets using a scheme we already render (`action:`, `http(s):`, `mailto:`)
  * are touched, so ordinary prose like `see item] (foo)` is left untouched.
  */
 function repairLinkMarkup(text) {
   const boldSplit = new RegExp(
-    `\\*\\*(\\[${LABEL_INNER}\\])\\*\\*\\s*(\\((?:${LINK_TARGET_SCHEME})[^)]*\\))`,
+    `\\*\\*(\\[${LABEL_INNER}\\])\\*\\*${LINK_GAP}*(\\((?:${LINK_TARGET_SCHEME})[^)]*\\))`,
     "gi",
   );
-  const spacedTarget = new RegExp(`\\]\\s+(\\((?:${LINK_TARGET_SCHEME}))`, "gi");
+  const spacedTarget = new RegExp(`\\]${LINK_GAP}+(\\((?:${LINK_TARGET_SCHEME}))`, "gi");
   return text.replace(boldSplit, "**$1$2**").replace(spacedTarget, "]$1");
 }
 
@@ -139,7 +158,10 @@ function scanLink(text, start) {
     return null;
   }
 
-  const href = target.trim();
+  // Trim ordinary whitespace and any leading/trailing zero-width characters so an
+  // invisible char tucked just inside the parentheses (e.g. `(​action:…)`) can't
+  // hide the scheme and demote the control to inert text.
+  const href = target.replace(ZERO_WIDTH_RE, "").trim();
   let token;
   if (href.toLowerCase().startsWith(ACTION_SCHEME)) {
     token = { type: "action", label, prompt: decodeAction(href.slice(ACTION_SCHEME.length)) };
