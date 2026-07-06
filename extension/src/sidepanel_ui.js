@@ -5,6 +5,26 @@ export function clearEmptyState(messagesEl) {
   if (empty) empty.remove();
 }
 
+/**
+ * Decide whether a message of the given `kind` should be hidden under the
+ * active view filter. Pure helper so the rule is unit-testable.
+ *
+ * The "all" view shows everything; the "alerts"/"files" views only show
+ * messages tagged with the matching kind. Untagged messages default to "chat".
+ * @param {string} view - active view filter ("all" | "alerts" | "files")
+ * @param {string} [kind] - message kind ("chat" | "alerts" | "files")
+ * @returns {boolean} true when the message should be hidden
+ */
+export function isHiddenByView(view, kind) {
+  const activeView = view || "all";
+  if (activeView === "all") return false;
+  const messageKind = kind || "chat";
+  const shouldShow =
+    (activeView === "alerts" && messageKind === "alerts") ||
+    (activeView === "files" && messageKind === "files");
+  return !shouldShow;
+}
+
 export function addMessage(messagesEl, role, text, extraClass = "") {
   clearEmptyState(messagesEl);
   const div = document.createElement("div");
