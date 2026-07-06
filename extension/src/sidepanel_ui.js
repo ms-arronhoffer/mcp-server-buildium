@@ -19,10 +19,7 @@ export function isHiddenByView(view, kind) {
   const activeView = view || "all";
   if (activeView === "all") return false;
   const messageKind = kind || "chat";
-  const shouldShow =
-    (activeView === "alerts" && messageKind === "alerts") ||
-    (activeView === "files" && messageKind === "files");
-  return !shouldShow;
+  return activeView !== messageKind;
 }
 
 export function addMessage(messagesEl, role, text, extraClass = "") {

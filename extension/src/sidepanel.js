@@ -295,7 +295,6 @@ function clearChatWithUndo() {
   history.splice(0, history.length);
   // Start fresh in the default view so new chats aren't hidden by a stale filter.
   ensureConversationVisible();
-  applyViewFilter();
   showToast("Conversation cleared.", "Undo", () => {
     if (!clearedSnapshot) return;
     els.messages.replaceChildren(...clearedSnapshot.nodes);
