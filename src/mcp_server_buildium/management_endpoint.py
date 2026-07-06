@@ -70,6 +70,17 @@ _EXTENSION_META = {
 }
 
 
+def _extension_archive_exists(config: "BuildiumConfig", browser: str) -> bool:
+    """Return True when a prebuilt archive for ``browser`` exists on disk.
+
+    Mirrors the check performed by the download route so the capabilities
+    endpoint never advertises a browser whose configured archive is missing
+    (which would render a download button that always fails with 503).
+    """
+    path = config.get_management_extension_path(browser)
+    return bool(path and os.path.isfile(path))
+
+
 def register_management_routes(
     mcp: Any,
     config: BuildiumConfig,
@@ -205,8 +216,11 @@ def register_management_routes(
             return JSONResponse({"error": "unauthorized"}, status_code=401)
         enabled = config.management_active()
         is_admin = bool(enabled and is_admin_claims(config, claims))
+        # Only advertise a browser when its archive is actually present on disk.
+        # The download route returns 503 for a configured-but-missing file, so
+        # listing it here would render a button that always fails.
         available = sorted(
-            b for b in MANAGEMENT_BROWSERS if config.get_management_extension_path(b)
+            b for b in MANAGEMENT_BROWSERS if _extension_archive_exists(config, b)
         )
         store = get_store(config)
         llm_configured = False
@@ -337,10 +351,35 @@ def register_management_routes(
                 status_code=400,
             )
         path = config.get_management_extension_path(browser)
-        if not path or not os.path.isfile(path):
+        if not path:
             _audit("manage_download_extension", "read", "error", args={"browser": browser})
             return JSONResponse(
                 {"error": f"No prebuilt {browser} extension is configured on this server."},
+                status_code=503,
+            )
+        if not os.path.isfile(path):
+            # The path is configured but points at a missing file. Surface the
+            # resolved absolute path so the operator can see exactly where the
+            # server looked (a common cause is a relative path resolved against
+            # an unexpected working directory).
+            resolved = os.path.abspath(path)
+            _audit(
+                "manage_download_extension",
+                "read",
+                "error",
+                args={"browser": browser, "path": resolved},
+            )
+            return JSONResponse(
+                {
+                    "error": (
+                        f"The configured {browser} extension archive was not found on "
+                        f"the server at '{resolved}'. Build and package the archive, "
+                        "then point the "
+                        f"BUILDIUM_MANAGEMENT_EXTENSION_{browser.upper()}_PATH "
+                        "environment variable at an existing file (an absolute path "
+                        "is recommended)."
+                    )
+                },
                 status_code=503,
             )
         content_type, filename = _EXTENSION_META[browser]
