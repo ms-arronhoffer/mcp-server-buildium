@@ -124,15 +124,16 @@ function scanLink(text, start) {
 
   let target;
   let end;
+  const targetOpen = labelEnd + 1;
   const targetClose = scanBalanced(text, labelEnd, "(", ")");
   if (targetClose >= 0) {
-    target = text.slice(labelEnd + 1, targetClose - 1);
+    target = text.slice(targetOpen, targetClose - 1);
     end = targetClose;
-  } else if (RENDERABLE_SCHEME_RE.test(text.slice(labelEnd + 1))) {
+  } else if (RENDERABLE_SCHEME_RE.test(text.slice(targetOpen))) {
     // Unbalanced target, but it clearly opens a renderable scheme: consume the
     // rest so the control still renders instead of leaking raw markup. Gated on
     // the scheme so ordinary prose like `see [x](note` is left untouched.
-    target = text.slice(labelEnd + 1);
+    target = text.slice(targetOpen);
     end = text.length;
   } else {
     return null;
