@@ -12,15 +12,17 @@ Design goals:
   standard library only, matching the repository's minimal-dependency ethos
   (the same reason DOCX *reading* in ``attachments.py`` is hand-rolled with
   ``zipfile``). CSV uses :mod:`csv`; XLSX/DOCX/PPTX are Office Open XML ZIP
-  packages assembled with :mod:`zipfile`; PDF is a minimal hand-written PDF.
+  packages assembled with :mod:`zipfile`; PDF is a hand-written PDF whose table
+  is laid out on a measured grid.
 * **Provider-neutral.** The raw bytes never go to the model. A tool builds the
   file, registers it here, and the ``/chat`` route streams it to the browser as
   a base64 ``artifact`` event so the extension can offer a download link.
 * **Presentation-ready.** A shared :data:`THEME_COLORS` palette drives every
   format so output looks professional, not sparse: PPTX decks are widescreen,
   themed, and can embed native charts (column/bar/line/pie) and tables; DOCX
-  uses styled headings and a banded, colour-headed table; PDF uses coloured
-  headings, a bold font, and shaded table rows.
+  uses styled headings and a banded, colour-headed table; PDF renders a cover
+  title, section copy, and a gridded table with a colour-filled header,
+  zebra-striped rows and right-aligned numeric columns.
 * **Per-request registry.** A :class:`contextvars.ContextVar` holds the files
   generated during the current chat turn, mirroring ``current_attachments``.
 """
@@ -1295,31 +1297,273 @@ def _pptx_theme() -> str:
 # ---------------------------------------------------------------------------
 # PDF
 # ---------------------------------------------------------------------------
-# Line/character budget for the fixed-width Helvetica text PDF. A US-Letter page
-# (612pt) with ~11pt Helvetica fits roughly 95 characters and ~52 lines; longer
-# text is wrapped and paginated accordingly.
-_PDF_LINES_PER_PAGE = 52
-_PDF_MAX_CHARS_PER_LINE = 95
+# Executive-grade PDF layout. Unlike the earlier fixed-width "typewriter" export
+# (which pipe-joined table cells into a single Helvetica line so columns never
+# actually lined up), this renderer measures text with the Core-14 Helvetica
+# metrics and lays content out on a real grid: a titled cover band, styled
+# section headings, wrapped body copy, and a genuine table with proportional
+# columns, a colour-filled header, zebra-striped rows, right-aligned numeric
+# cells and repeating headers across page breaks. Everything is still produced
+# with the standard library only (no reportlab/fpdf dependency).
+
+# Page geometry (US-Letter, 612x792 points) and content margins.
+_PDF_PAGE_W = 612.0
+_PDF_PAGE_H = 792.0
+_PDF_MARGIN_L = 54.0
+_PDF_MARGIN_R = 54.0
+_PDF_MARGIN_TOP = 54.0
+_PDF_MARGIN_BOTTOM = 56.0
+_PDF_CONTENT_W = _PDF_PAGE_W - _PDF_MARGIN_L - _PDF_MARGIN_R
+_PDF_CONTENT_TOP = _PDF_PAGE_H - _PDF_MARGIN_TOP
+# Hairline colour for table row separators (light blue-grey).
+_PDF_BORDER = "C9D2DE"
+
+# Adobe Core-14 advance widths (units of 1/1000 em) for printable ASCII
+# (codepoints 32..126). These let us measure real string widths so wrapping and
+# column sizing match what a viewer renders, instead of guessing a fixed
+# characters-per-line budget.
+_HELV_W = (
+    278,
+    278,
+    355,
+    556,
+    556,
+    889,
+    667,
+    191,
+    333,
+    333,
+    389,
+    584,
+    278,
+    333,
+    278,
+    278,
+    556,
+    556,
+    556,
+    556,
+    556,
+    556,
+    556,
+    556,
+    556,
+    556,
+    278,
+    278,
+    584,
+    584,
+    584,
+    556,
+    1015,
+    667,
+    667,
+    722,
+    722,
+    667,
+    611,
+    778,
+    722,
+    278,
+    500,
+    667,
+    556,
+    833,
+    722,
+    778,
+    667,
+    778,
+    722,
+    667,
+    611,
+    722,
+    667,
+    944,
+    667,
+    667,
+    611,
+    278,
+    278,
+    278,
+    469,
+    556,
+    333,
+    556,
+    556,
+    500,
+    556,
+    556,
+    278,
+    556,
+    556,
+    222,
+    222,
+    500,
+    222,
+    833,
+    556,
+    556,
+    556,
+    556,
+    333,
+    500,
+    278,
+    556,
+    500,
+    722,
+    500,
+    500,
+    500,
+    334,
+    260,
+    334,
+    584,
+)
+_HELV_BOLD_W = (
+    278,
+    333,
+    474,
+    556,
+    556,
+    889,
+    722,
+    238,
+    333,
+    333,
+    389,
+    584,
+    278,
+    333,
+    278,
+    278,
+    556,
+    556,
+    556,
+    556,
+    556,
+    556,
+    556,
+    556,
+    556,
+    556,
+    333,
+    333,
+    584,
+    584,
+    584,
+    611,
+    975,
+    722,
+    722,
+    722,
+    722,
+    667,
+    611,
+    778,
+    722,
+    278,
+    556,
+    722,
+    611,
+    833,
+    722,
+    778,
+    667,
+    778,
+    722,
+    667,
+    611,
+    722,
+    667,
+    944,
+    667,
+    667,
+    611,
+    333,
+    278,
+    333,
+    584,
+    556,
+    333,
+    556,
+    611,
+    556,
+    611,
+    556,
+    333,
+    611,
+    611,
+    278,
+    278,
+    556,
+    278,
+    889,
+    611,
+    611,
+    611,
+    611,
+    389,
+    556,
+    333,
+    611,
+    556,
+    778,
+    556,
+    556,
+    500,
+    389,
+    280,
+    389,
+    584,
+)
 
 
-def _wrap(text: str, width: int) -> list[str]:
-    """Wrap ``text`` to ``width`` characters, preserving explicit newlines."""
+def _char_width(ch: str, *, bold: bool) -> int:
+    """Return the advance width (1/1000 em) of ``ch`` in Helvetica[-Bold]."""
+    cp = ord(ch)
+    if 32 <= cp <= 126:
+        return (_HELV_BOLD_W if bold else _HELV_W)[cp - 32]
+    return 600  # reasonable average for anything outside printable ASCII
+
+
+def _text_width(text: str, size: float, *, bold: bool = False) -> float:
+    """Return the rendered width of ``text`` at ``size`` points."""
+    return sum(_char_width(ch, bold=bold) for ch in text) * size / 1000.0
+
+
+def _break_token(word: str, max_w: float, size: float, *, bold: bool) -> list[str]:
+    """Hard-break a single over-long token (e.g. a long id) to fit ``max_w``."""
     out: list[str] = []
-    for raw_line in text.split("\n"):
-        if not raw_line:
-            out.append("")
-            continue
-        words = raw_line.split(" ")
-        current = ""
-        for word in words:
-            candidate = f"{current} {word}".strip()
-            if len(candidate) > width and current:
-                out.append(current)
-                current = word
-            else:
-                current = candidate
+    current = ""
+    for ch in word:
+        candidate = current + ch
+        if current and _text_width(candidate, size, bold=bold) > max_w:
+            out.append(current)
+            current = ch
+        else:
+            current = candidate
+    if current:
         out.append(current)
-    return out
+    return out or [""]
+
+
+def _wrap_width(text: str, max_w: float, size: float, *, bold: bool = False) -> list[str]:
+    """Word-wrap ``text`` to ``max_w`` points, honouring explicit newlines."""
+    lines: list[str] = []
+    for raw_line in str(text).split("\n"):
+        current = ""
+        for word in raw_line.split(" "):
+            if current and _text_width(f"{current} {word}", size, bold=bold) > max_w:
+                lines.append(current)
+                current = ""
+            if not current and _text_width(word, size, bold=bold) > max_w:
+                pieces = _break_token(word, max_w, size, bold=bold)
+                lines.extend(pieces[:-1])
+                current = pieces[-1]
+            else:
+                current = word if not current else f"{current} {word}"
+        lines.append(current)
+    return lines or [""]
 
 
 def _pdf_escape(text: str) -> str:
@@ -1335,11 +1579,296 @@ def _hex_to_pdf_rgb(hex_color: str) -> str:
     return f"{r:.3f} {g:.3f} {b:.3f}"
 
 
-# Vertical layout for the PDF text grid (US-Letter, 612x792 points).
-_PDF_LEFT = 56
-_PDF_RIGHT = 556
-_PDF_TOP = 748
-_PDF_LEADING = 16
+# Transliterate common typographic characters that have no Latin-1 glyph so the
+# text renders cleanly (as ``-``/``"``/``...``) instead of a ``?`` placeholder.
+_PDF_TRANSLATE = str.maketrans(
+    {
+        "\u2010": "-",
+        "\u2011": "-",
+        "\u2012": "-",
+        "\u2013": "-",
+        "\u2014": "-",
+        "\u2015": "-",
+        "\u2212": "-",
+        "\u2018": "'",
+        "\u2019": "'",
+        "\u201a": "'",
+        "\u201c": '"',
+        "\u201d": '"',
+        "\u201e": '"',
+        "\u2022": "-",
+        "\u00b7": "-",
+        "\u2026": "...",
+        "\u00a0": " ",
+        "\u2009": " ",
+        "\u202f": " ",
+    }
+)
+
+
+def _op_text(x: float, y: float, text: str, font: bytes, size: float, color_hex: str) -> bytes:
+    """Return a content-stream operator drawing ``text`` at (x, y)."""
+    shown = _pdf_escape(text.translate(_PDF_TRANSLATE)).encode("latin-1", errors="replace")
+    return (
+        b"BT /"
+        + font
+        + f" {size:g} Tf ".encode("ascii")
+        + _hex_to_pdf_rgb(color_hex).encode("ascii")
+        + f" rg {x:.2f} {y:.2f} Td (".encode("ascii")
+        + shown
+        + b") Tj ET"
+    )
+
+
+def _op_rect(x: float, y: float, w: float, h: float, fill_hex: str) -> bytes:
+    """Return a filled-rectangle operator (used for header/zebra bands)."""
+    return f"{_hex_to_pdf_rgb(fill_hex)} rg {x:.2f} {y:.2f} {w:.2f} {h:.2f} re f".encode("ascii")
+
+
+def _op_line(x1: float, y1: float, x2: float, y2: float, color_hex: str, width: float) -> bytes:
+    """Return a stroked-line operator (rules and separators)."""
+    return (
+        f"{_hex_to_pdf_rgb(color_hex)} RG {width:.2f} w {x1:.2f} {y1:.2f} m {x2:.2f} {y2:.2f} l S"
+    ).encode("ascii")
+
+
+class _PdfCanvas:
+    """A minimal flowing-layout canvas that paginates as content is added.
+
+    Content is appended top-to-bottom; ``_ensure`` starts a new page when the
+    next block would cross the bottom margin. Each page accumulates a list of
+    content-stream operators that :meth:`to_pdf_bytes` serialises into a valid
+    PDF (with the same object/xref machinery as before).
+    """
+
+    def __init__(self) -> None:
+        self.pages: list[list[bytes]] = [[]]
+        self.y = _PDF_CONTENT_TOP
+        self.has_content = False
+
+    def _ops(self) -> list[bytes]:
+        return self.pages[-1]
+
+    def _new_page(self) -> None:
+        self.pages.append([])
+        self.y = _PDF_CONTENT_TOP
+
+    def _ensure(self, height: float) -> None:
+        if self.y - height < _PDF_MARGIN_BOTTOM:
+            self._new_page()
+
+    # -- block builders -----------------------------------------------------
+    def draw_title(self, title: str) -> None:
+        self.has_content = True
+        size = 22.0
+        for line in _wrap_width(title, _PDF_CONTENT_W, size, bold=True):
+            self._ensure(size + 8)
+            baseline = self.y - size
+            self._ops().append(
+                _op_text(_PDF_MARGIN_L, baseline, line, b"F2", size, THEME_COLORS["accent1"])
+            )
+            self.y = baseline - 6
+        self._ensure(12)
+        rule_y = self.y
+        self._ops().append(
+            _op_line(
+                _PDF_MARGIN_L,
+                rule_y,
+                _PDF_MARGIN_L + _PDF_CONTENT_W,
+                rule_y,
+                THEME_COLORS["accent3"],
+                1.5,
+            )
+        )
+        self.y = rule_y - 18
+
+    def draw_section(self, section: Section) -> None:
+        if section.heading:
+            self.has_content = True
+            size = 13.0
+            for line in _wrap_width(section.heading, _PDF_CONTENT_W, size, bold=True):
+                self._ensure(size + 6)
+                baseline = self.y - size
+                self._ops().append(
+                    _op_text(_PDF_MARGIN_L, baseline, line, b"F2", size, THEME_COLORS["accent1"])
+                )
+                self.y = baseline - 4
+            self.y -= 2
+        if section.body:
+            self.has_content = True
+            size = 10.5
+            leading = 15.0
+            for line in _wrap_width(section.body, _PDF_CONTENT_W, size, bold=False):
+                self._ensure(leading)
+                baseline = self.y - size
+                if line:
+                    self._ops().append(
+                        _op_text(_PDF_MARGIN_L, baseline, line, b"F1", size, THEME_COLORS["dk1"])
+                    )
+                self.y -= leading
+        self.y -= 10
+
+    def draw_table(self, columns: list[str], rows: list[list[object]]) -> None:
+        cols = [str(c) for c in columns]
+        body = [["" if cell is None else str(cell) for cell in row] for row in rows]
+        ncol = max([len(cols)] + [len(r) for r in body])
+        if ncol == 0:
+            return
+        self.has_content = True
+        cols += [""] * (ncol - len(cols))
+        body = [r + [""] * (ncol - len(r)) for r in body]
+
+        header_size = 10.0
+        body_size = 10.0
+        hpad = 7.0
+        vpad = 6.0
+        line_gap = 13.0
+
+        # Proportional column widths from natural content width, scaled to fill
+        # the printable width so the table reads as a full-width grid.
+        natural: list[float] = []
+        for ci in range(ncol):
+            w = _text_width(cols[ci], header_size, bold=True)
+            for r in body:
+                w = max(w, _text_width(r[ci], body_size, bold=False))
+            natural.append(w + 2 * hpad)
+        scale = _PDF_CONTENT_W / (sum(natural) or 1.0)
+        widths = [w * scale for w in natural]
+        xs = [_PDF_MARGIN_L]
+        for w in widths[:-1]:
+            xs.append(xs[-1] + w)
+
+        # Right-align columns whose non-empty cells are all numeric.
+        right = []
+        for ci in range(ncol):
+            vals = [r[ci] for r in body if r[ci].strip()]
+            right.append(bool(vals) and all(_num(v) is not None for v in vals))
+
+        def cell_x(ci: int, text: str, size: float, *, bold: bool) -> float:
+            if right[ci]:
+                return xs[ci] + widths[ci] - hpad - _text_width(text, size, bold=bold)
+            return xs[ci] + hpad
+
+        def draw_header_row() -> None:
+            cell_lines = [
+                _wrap_width(cols[ci], widths[ci] - 2 * hpad, header_size, bold=True)
+                for ci in range(ncol)
+            ]
+            nlines = max(len(cl) for cl in cell_lines)
+            row_h = nlines * line_gap + 2 * vpad
+            self._ensure(row_h)
+            top = self.y
+            self._ops().append(
+                _op_rect(_PDF_MARGIN_L, top - row_h, _PDF_CONTENT_W, row_h, THEME_COLORS["accent1"])
+            )
+            for ci in range(ncol):
+                for li, line in enumerate(cell_lines[ci]):
+                    baseline = top - vpad - header_size - li * line_gap
+                    self._ops().append(
+                        _op_text(
+                            cell_x(ci, line, header_size, bold=True),
+                            baseline,
+                            line,
+                            b"F2",
+                            header_size,
+                            THEME_COLORS["lt1"],
+                        )
+                    )
+            self.y = top - row_h
+
+        draw_header_row()
+        for ri, r in enumerate(body):
+            cell_lines = [
+                _wrap_width(r[ci], widths[ci] - 2 * hpad, body_size, bold=False)
+                for ci in range(ncol)
+            ]
+            nlines = max((len(cl) for cl in cell_lines), default=1)
+            row_h = nlines * line_gap + 2 * vpad
+            if self.y - row_h < _PDF_MARGIN_BOTTOM:
+                self._new_page()
+                draw_header_row()
+            top = self.y
+            if ri % 2 == 1:
+                self._ops().append(
+                    _op_rect(_PDF_MARGIN_L, top - row_h, _PDF_CONTENT_W, row_h, THEME_COLORS["lt2"])
+                )
+            for ci in range(ncol):
+                for li, line in enumerate(cell_lines[ci]):
+                    if not line:
+                        continue
+                    baseline = top - vpad - body_size - li * line_gap
+                    self._ops().append(
+                        _op_text(
+                            cell_x(ci, line, body_size, bold=False),
+                            baseline,
+                            line,
+                            b"F1",
+                            body_size,
+                            THEME_COLORS["dk1"],
+                        )
+                    )
+            bottom = top - row_h
+            self._ops().append(
+                _op_line(
+                    _PDF_MARGIN_L, bottom, _PDF_MARGIN_L + _PDF_CONTENT_W, bottom, _PDF_BORDER, 0.5
+                )
+            )
+            self.y = bottom
+        self.y -= 12
+
+    # -- serialisation ------------------------------------------------------
+    def _add_footers(self) -> None:
+        """Draw a centred ``Page N of M`` footer on every page."""
+        total = len(self.pages)
+        size = 8.0
+        for idx, ops in enumerate(self.pages, start=1):
+            label = f"Page {idx} of {total}"
+            x = _PDF_MARGIN_L + (_PDF_CONTENT_W - _text_width(label, size, bold=False)) / 2
+            ops.append(
+                _op_text(x, _PDF_MARGIN_BOTTOM - 24, label, b"F1", size, THEME_COLORS["dk2"])
+            )
+
+    def to_pdf_bytes(self) -> bytes:
+        self._add_footers()
+        objects: list[bytes] = []
+
+        def add_object(body: bytes) -> int:
+            objects.append(body)
+            return len(objects)
+
+        objects.append(b"")  # 1 catalog (placeholder)
+        objects.append(b"")  # 2 pages (placeholder)
+        font_num = add_object(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+        font_bold_num = add_object(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>")
+
+        page_nums: list[int] = []
+        for ops in self.pages:
+            content = b"\n".join(ops)
+            stream_num = add_object(
+                b"<< /Length "
+                + str(len(content)).encode("ascii")
+                + b" >>\nstream\n"
+                + content
+                + b"\nendstream"
+            )
+            page_body = (
+                b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+                b"/Resources << /Font << /F1 " + str(font_num).encode("ascii") + b" 0 R "
+                b"/F2 " + str(font_bold_num).encode("ascii") + b" 0 R >> >> "
+                b"/Contents " + str(stream_num).encode("ascii") + b" 0 R >>"
+            )
+            page_nums.append(add_object(page_body))
+
+        kids = b" ".join(f"{n} 0 R".encode("ascii") for n in page_nums)
+        objects[1] = (
+            b"<< /Type /Pages /Kids ["
+            + kids
+            + b"] /Count "
+            + str(len(page_nums)).encode("ascii")
+            + b" >>"
+        )
+        objects[0] = b"<< /Type /Catalog /Pages 2 0 R >>"
+        return _assemble_pdf(objects)
 
 
 def _build_pdf(
@@ -1348,135 +1877,21 @@ def _build_pdf(
     columns: list[str],
     rows: list[list[object]],
 ) -> bytes:
-    """Build a styled, multi-page text PDF from the supplied content."""
-    # Each entry is (text, kind); kind drives colour, weight and background.
-    lines: list[tuple[str, str]] = []
-    if title:
-        lines.append((title, "title"))
-        lines.append(("", "blank"))
-    for section in sections:
-        if section.heading:
-            lines.append((section.heading, "heading"))
-        for wrapped in _wrap(section.body or "", _PDF_MAX_CHARS_PER_LINE):
-            lines.append((wrapped, "body"))
-        lines.append(("", "blank"))
-    if columns or rows:
-        if columns:
-            lines.append((" | ".join(str(c) for c in columns), "thead"))
-        for r_index, row in enumerate(rows):
-            kind = "row_odd" if r_index % 2 else "row_even"
-            text = " | ".join("" if c is None else str(c) for c in row)
-            for wrapped in _wrap(text, _PDF_MAX_CHARS_PER_LINE):
-                lines.append((wrapped, kind))
-
-    if not lines:
+    """Build a styled, multi-page PDF (cover title, sections, real table)."""
+    if not (title or sections or columns or rows):
         raise ArtifactError("A PDF export needs a title, sections, or a table.")
 
-    # Paginate the lines.
-    pages: list[list[tuple[str, str]]] = [
-        lines[i : i + _PDF_LINES_PER_PAGE] for i in range(0, len(lines), _PDF_LINES_PER_PAGE)
-    ]
+    canvas = _PdfCanvas()
+    if title:
+        canvas.draw_title(title)
+    for section in sections:
+        canvas.draw_section(section)
+    if columns or rows:
+        canvas.draw_table(columns, rows)
 
-    # Build PDF objects. Object 1: catalog, 2: pages, 3: regular font, 4: bold
-    # font, then per page a page object and a content stream object.
-    objects: list[bytes] = []
-
-    def add_object(body: bytes) -> int:
-        objects.append(body)
-        return len(objects)  # 1-based object number
-
-    # Reserve catalog(1) and pages(2) numbers by placeholders; fill after we know
-    # the page object numbers.
-    objects.append(b"")  # 1 catalog (placeholder)
-    objects.append(b"")  # 2 pages (placeholder)
-    font_num = add_object(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
-    font_bold_num = add_object(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>")
-
-    page_nums: list[int] = []
-    for page_lines in pages:
-        content = _pdf_content_stream(page_lines)
-        stream_num = add_object(
-            b"<< /Length "
-            + str(len(content)).encode("ascii")
-            + b" >>\nstream\n"
-            + content
-            + b"\nendstream"
-        )
-        page_body = (
-            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
-            b"/Resources << /Font << /F1 " + str(font_num).encode("ascii") + b" 0 R "
-            b"/F2 " + str(font_bold_num).encode("ascii") + b" 0 R >> >> "
-            b"/Contents " + str(stream_num).encode("ascii") + b" 0 R >>"
-        )
-        page_nums.append(add_object(page_body))
-
-    kids = b" ".join(f"{n} 0 R".encode("ascii") for n in page_nums)
-    objects[1] = (
-        b"<< /Type /Pages /Kids ["
-        + kids
-        + b"] /Count "
-        + str(len(page_nums)).encode("ascii")
-        + b" >>"
-    )
-    objects[0] = b"<< /Type /Catalog /Pages 2 0 R >>"
-
-    return _assemble_pdf(objects)
-
-
-# (text_color_hex, font, size, fill_hex_or_None) per line kind.
-_PDF_LINE_STYLE: dict[str, tuple[str, bytes, int, str | None]] = {
-    "title": (THEME_COLORS["accent1"], b"F2", 20, None),
-    "heading": (THEME_COLORS["accent1"], b"F2", 14, None),
-    "thead": (THEME_COLORS["lt1"], b"F2", 11, THEME_COLORS["accent1"]),
-    "row_even": (THEME_COLORS["dk1"], b"F1", 11, None),
-    "row_odd": (THEME_COLORS["dk1"], b"F1", 11, THEME_COLORS["lt2"]),
-    "body": (THEME_COLORS["dk1"], b"F1", 11, None),
-    "blank": (THEME_COLORS["dk1"], b"F1", 11, None),
-}
-
-
-def _pdf_content_stream(page_lines: list[tuple[str, str]]) -> bytes:
-    """Return the content stream drawing ``page_lines`` with colour and shading."""
-    parts: list[bytes] = []
-    for i, (text, kind) in enumerate(page_lines):
-        color_hex, font, size, fill_hex = _PDF_LINE_STYLE.get(kind, _PDF_LINE_STYLE["body"])
-        y = _PDF_TOP - i * _PDF_LEADING
-
-        # Background band for table header / zebra rows.
-        if fill_hex:
-            parts.append(
-                f"{_hex_to_pdf_rgb(fill_hex)} rg "
-                f"{_PDF_LEFT - 6} {y - 4} {_PDF_RIGHT - _PDF_LEFT + 12} {_PDF_LEADING} re f".encode(
-                    "ascii"
-                )
-            )
-
-        if text:
-            shown = _pdf_escape(text).encode("latin-1", errors="replace")
-            parts.append(
-                b"BT /"
-                + font
-                + b" "
-                + str(size).encode("ascii")
-                + b" Tf "
-                + _hex_to_pdf_rgb(color_hex).encode("ascii")
-                + b" rg "
-                + str(_PDF_LEFT).encode("ascii")
-                + b" "
-                + str(y).encode("ascii")
-                + b" Td ("
-                + shown
-                + b") Tj ET"
-            )
-
-        # Accent rule beneath the document title.
-        if kind == "title":
-            rule_y = y - 6
-            parts.append(
-                f"{_hex_to_pdf_rgb(THEME_COLORS['accent3'])} RG 1.5 w "
-                f"{_PDF_LEFT} {rule_y} m {_PDF_RIGHT} {rule_y} l S".encode("ascii")
-            )
-    return b"\n".join(parts)
+    if not canvas.has_content:
+        raise ArtifactError("A PDF export needs a title, sections, or a table.")
+    return canvas.to_pdf_bytes()
 
 
 def _assemble_pdf(objects: list[bytes]) -> bytes:

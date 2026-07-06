@@ -88,6 +88,27 @@ def test_pdf_export_is_wellformed_and_paginates() -> None:
     assert gf.data.count(b"/Type /Page ") >= 2
 
 
+def test_pdf_table_draws_real_cells_not_pipe_joined() -> None:
+    # The executive layout draws each cell as its own positioned text run; the
+    # old "typewriter" export pipe-joined a row into one Helvetica line so the
+    # columns never lined up. Guard against a regression to that shape.
+    gf = build_generated_file(file_format="pdf", title="Report", columns=COLUMNS, rows=ROWS)
+    assert b" | " not in gf.data
+    assert b"(Occupancy) Tj" in gf.data  # header cell drawn on its own
+    assert b"(Maple Court) Tj" in gf.data  # body cell drawn on its own
+
+
+def test_pdf_repeats_table_header_on_each_page() -> None:
+    # A multi-page table repeats its header band on every page so a printed
+    # report stays readable after a page break.
+    rows = [[f"Unit {i}", i, f"{i}%"] for i in range(120)]
+    gf = build_generated_file(file_format="pdf", columns=COLUMNS, rows=rows)
+    page_count = gf.data.count(b"/Type /Page ")
+    assert page_count >= 2
+    # The unique header label is redrawn once per page.
+    assert gf.data.count(b"(Occupancy) Tj") == page_count
+
+
 def test_pptx_export_is_valid_package_with_slides() -> None:
     gf = build_generated_file(
         file_format="pptx",
