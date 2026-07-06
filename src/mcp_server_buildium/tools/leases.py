@@ -1,11 +1,16 @@
 """Lease management tools for Buildium."""
 
+import inspect
+import logging
 from typing import Any
 
 from fastmcp import FastMCP
 
 from ..buildium_client import BuildiumClient
+from ..logging_config import get_logger, log_event
 from . import _common as c
+
+logger = get_logger("mcp_server_buildium.tools.leases")
 
 try:
     from mcp_server_buildium.buildium_sdk.models.lease_put_message import LeasePutMessage
@@ -17,6 +22,76 @@ except ImportError:  # pragma: no cover
 
 
 LEASE_STATUSES = {"Active", "Past", "Future"}
+
+
+async def _resolve_property_name(
+    client: BuildiumClient, property_id: Any, cache: dict[Any, str | None]
+) -> str | None:
+    """Resolve a rental property's display name from its id (best-effort, cached).
+
+    A lease read model only carries ``PropertyId``/``UnitId``, so on its own the
+    assistant can only render a bare "property 4". Looking the property up lets it
+    show the human-friendly name (e.g. "Riverside Commons"). Failures are swallowed
+    so enrichment never turns a successful lease read into an error.
+    """
+    if property_id is None:
+        return None
+    if property_id in cache:
+        return cache[property_id]
+    name: str | None = None
+    try:
+        prop = await client.rentals_api.external_api_rentals_get_rental_by_id(
+            property_id=property_id
+        )
+        if isinstance(prop, list):
+            prop = prop[0] if prop else None
+        if hasattr(prop, "to_dict"):
+            prop = prop.to_dict()
+        if isinstance(prop, dict):
+            resolved = prop.get("Name")
+            name = resolved if isinstance(resolved, str) and resolved.strip() else None
+    except Exception as exc:  # noqa: BLE001 - enrichment is best-effort, never fatal
+        log_event(
+            logger,
+            logging.DEBUG,
+            "lease.property_name_lookup_failed",
+            property_id=property_id,
+            error=type(exc).__name__,
+        )
+        name = None
+    cache[property_id] = name
+    return name
+
+
+async def _attach_property_name(
+    client: BuildiumClient, lease: Any, cache: dict[Any, str | None]
+) -> Any:
+    """Attach a ``PropertyName`` to a serialized lease dict when it can be resolved."""
+    if not isinstance(lease, dict) or lease.get("PropertyName"):
+        return lease
+    name = await _resolve_property_name(client, lease.get("PropertyId"), cache)
+    if name:
+        lease["PropertyName"] = name
+    return lease
+
+
+async def enrich_leases_with_property_name(client: BuildiumClient, result: Any) -> Any:
+    """Await/serialize a lease read result and enrich each lease with ``PropertyName``.
+
+    Accepts an awaitable (the SDK call), a single lease model/dict, or a list of
+    them, resolves each distinct ``PropertyId`` once (via an in-call cache), and
+    returns plain JSON-ready data.
+    """
+    if inspect.isawaitable(result):
+        result = await result
+    data = c._serialize(result)
+    cache: dict[Any, str | None] = {}
+    if isinstance(data, list):
+        for item in data:
+            await _attach_property_name(client, item, cache)
+    else:
+        await _attach_property_name(client, data, cache)
+    return data
 
 
 def register_lease_tools(mcp: FastMCP, client: BuildiumClient) -> None:
@@ -92,7 +167,10 @@ def register_lease_tools(mcp: FastMCP, client: BuildiumClient) -> None:
 
         return await c.execute(
             "list_leases",
-            lambda: client.leases_api.external_api_leases_get_leases(**kwargs),
+            lambda: enrich_leases_with_property_name(
+                client,
+                client.leases_api.external_api_leases_get_leases(**kwargs),
+            ),
         )
 
     @mcp.tool()
@@ -100,7 +178,10 @@ def register_lease_tools(mcp: FastMCP, client: BuildiumClient) -> None:
         """Get a specific lease by ID."""
         return await c.execute(
             "get_lease",
-            lambda: client.leases_api.external_api_leases_get_lease_by_id(lease_id=lease_id),
+            lambda: enrich_leases_with_property_name(
+                client,
+                client.leases_api.external_api_leases_get_lease_by_id(lease_id=lease_id),
+            ),
         )
 
     @mcp.tool()
