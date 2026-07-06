@@ -119,6 +119,43 @@ describe("parseInline", () => {
     ]);
   });
 
+  it("parses an action link whose label contains a bracketed qualifier", () => {
+    // The assistant sometimes qualifies a label with a bracketed property or
+    // building, e.g. `[Unit 101 [Riverside Commons]](action:…)`. Nested square
+    // brackets must not break the `[label](target)` grammar and leak raw text.
+    const tokens = parseInline(
+      "[Unit 101 [Riverside Commons]](action:Show details for unit 5)",
+    );
+    expect(tokens).toEqual([
+      {
+        type: "action",
+        label: "Unit 101 [Riverside Commons]",
+        prompt: "Show details for unit 5",
+      },
+    ]);
+  });
+
+  it("parses a bold action link whose label contains a bracketed qualifier", () => {
+    // The clickable-table repro: `**[Maplewood Apartments [Bldg A]](action:…)**`
+    // rendered the whole thing as literal `[label](action:…)` text before the
+    // label grammar allowed balanced nested brackets.
+    const tokens = parseInline(
+      "**[Maplewood Apartments [Bldg A]](action:Show property 1)**",
+    );
+    expect(tokens).toEqual([
+      {
+        type: "bold",
+        children: [
+          {
+            type: "action",
+            label: "Maplewood Apartments [Bldg A]",
+            prompt: "Show property 1",
+          },
+        ],
+      },
+    ]);
+  });
+
   it("keeps unsafe link schemes as inert text", () => {
     // A javascript: URL must never become a clickable anchor/action.
     const tokens = parseInline("[x](javascript:alert(1))");

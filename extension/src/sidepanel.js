@@ -9,6 +9,7 @@ import { ArtifactUrlStore } from "./artifactUrls.js";
 import {
   addMessage,
   hideBanner,
+  isHiddenByView,
   renderAssistantMarkdown,
   setMessageKind,
   setConnection,
@@ -214,14 +215,23 @@ function applyViewFilter() {
   const view = panelPrefs.view || "all";
   const items = els.messages.querySelectorAll(".msg");
   for (const item of items) {
-    if (view === "all") {
-      item.classList.remove("hidden-by-filter");
-      continue;
-    }
-    const kind = item.dataset.kind || "chat";
-    const shouldShow = (view === "alerts" && kind === "alerts") || (view === "files" && kind === "files");
-    item.classList.toggle("hidden-by-filter", !shouldShow);
+    item.classList.toggle("hidden-by-filter", isHiddenByView(view, item.dataset.kind));
   }
+}
+
+/**
+ * Reset the message view filter back to "all" so an active conversation is
+ * always fully visible. The "alerts"/"files" filters are review lenses; when
+ * the user starts a new turn or clears the chat, forcing them to a filtered
+ * view would silently hide the fresh chat messages (they would appear while
+ * streaming and then vanish once `applyViewFilter` runs on completion).
+ */
+function ensureConversationVisible() {
+  if ((panelPrefs.view || "all") === "all") return;
+  panelPrefs.view = "all";
+  renderViewControls();
+  applyViewFilter();
+  scheduleSavePanelPrefs();
 }
 
 function setComposerError(message = "") {
@@ -283,7 +293,8 @@ function clearChatWithUndo() {
   empty.textContent = "Conversation cleared. Use quick actions above to start again.";
   els.messages.replaceChildren(empty);
   history.splice(0, history.length);
-  applyViewFilter();
+  // Start fresh in the default view so new chats aren't hidden by a stale filter.
+  ensureConversationVisible();
   showToast("Conversation cleared.", "Undo", () => {
     if (!clearedSnapshot) return;
     els.messages.replaceChildren(...clearedSnapshot.nodes);
@@ -371,6 +382,8 @@ async function handleSend(text) {
     consumedAttachments.length > 0
       ? `${text}${text.trim() ? "\n" : ""}📎 ${consumedAttachments.map((a) => a.name).join(", ")}`
       : text;
+  // A new turn must be visible even if the user was reviewing a filtered view.
+  ensureConversationVisible();
   const userEl = addMessage(els.messages, "user", userLabel);
   setMessageKind(userEl, "chat");
 

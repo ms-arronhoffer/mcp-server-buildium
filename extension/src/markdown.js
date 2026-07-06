@@ -28,6 +28,13 @@ const SAFE_LINK_RE = /^(https?:|mailto:)/i;
 // Used only to *repair* malformed markup, so it must not be broadened to unsafe
 // schemes such as `javascript:`.
 const LINK_TARGET_SCHEME = "action:|https?:|mailto:";
+// Grammar for the visible `[label]` of a link/action, allowing up to two levels
+// of *balanced* square brackets so labels that themselves carry a bracketed
+// qualifier — e.g. `[Maplewood Apartments [Bldg A]]` or `[Unit 101 [Riverside
+// Commons]]` — are captured whole instead of truncating at the first `]` and
+// leaking the raw `[label](action:…)` markup to the user. Mirrors the balanced
+// parenthesis handling used for the link target.
+const LABEL_INNER = "(?:[^\\[\\]]|\\[(?:[^\\[\\]]|\\[[^\\[\\]]*\\])*\\])+";
 
 /**
  * Repair link/action markup that the assistant sometimes emits in a shape that
@@ -44,7 +51,7 @@ const LINK_TARGET_SCHEME = "action:|https?:|mailto:";
  */
 function repairLinkMarkup(text) {
   const boldSplit = new RegExp(
-    `\\*\\*(\\[[^\\]]+\\])\\*\\*\\s*(\\((?:${LINK_TARGET_SCHEME})[^)]*\\))`,
+    `\\*\\*(\\[${LABEL_INNER}\\])\\*\\*\\s*(\\((?:${LINK_TARGET_SCHEME})[^)]*\\))`,
     "gi",
   );
   const spacedTarget = new RegExp(`\\]\\s+(\\((?:${LINK_TARGET_SCHEME}))`, "gi");
@@ -81,11 +88,14 @@ export function parseInline(text) {
 
   const rules = [
     {
-      // The target allows up to two levels of balanced parentheses so
-      // natural-language action prompts like `action:Show details for lease 1
-      // (Unit 101)` or `action:Show lease 12 (Riverside Commons (Bldg A))` are
-      // captured whole instead of being truncated at the first `)`.
-      re: /^\[([^\]]+)\]\(((?:[^()]|\((?:[^()]|\([^()]*\))*\))*)\)/,
+      // The label allows up to two levels of balanced square brackets and the
+      // target allows up to two levels of balanced parentheses, so
+      // natural-language labels/prompts like `[Unit 101 [Riverside Commons]]`
+      // or `action:Show lease 12 (Riverside Commons (Bldg A))` are captured
+      // whole instead of being truncated at the first `]`/`)`.
+      re: new RegExp(
+        `^\\[(${LABEL_INNER})\\]\\(((?:[^()]|\\((?:[^()]|\\([^()]*\\))*\\))*)\\)`,
+      ),
       make: (m) => {
         const href = m[2].trim();
         if (href.toLowerCase().startsWith(ACTION_SCHEME)) {
