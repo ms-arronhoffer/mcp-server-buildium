@@ -88,6 +88,27 @@ def test_pdf_export_is_wellformed_and_paginates() -> None:
     assert gf.data.count(b"/Type /Page ") >= 2
 
 
+def test_pdf_table_draws_real_cells_not_pipe_joined() -> None:
+    # The executive layout draws each cell as its own positioned text run; the
+    # old "typewriter" export pipe-joined a row into one Helvetica line so the
+    # columns never lined up. Guard against a regression to that shape.
+    gf = build_generated_file(file_format="pdf", title="Report", columns=COLUMNS, rows=ROWS)
+    assert b" | " not in gf.data
+    assert b"(Occupancy) Tj" in gf.data  # header cell drawn on its own
+    assert b"(Maple Court) Tj" in gf.data  # body cell drawn on its own
+
+
+def test_pdf_repeats_table_header_on_each_page() -> None:
+    # A multi-page table repeats its header band on every page so a printed
+    # report stays readable after a page break.
+    rows = [[f"Unit {i}", i, f"{i}%"] for i in range(120)]
+    gf = build_generated_file(file_format="pdf", columns=COLUMNS, rows=rows)
+    page_count = gf.data.count(b"/Type /Page ")
+    assert page_count >= 2
+    # The unique header label is redrawn once per page.
+    assert gf.data.count(b"(Occupancy) Tj") == page_count
+
+
 def test_pptx_export_is_valid_package_with_slides() -> None:
     gf = build_generated_file(
         file_format="pptx",
@@ -228,6 +249,61 @@ def test_pdf_is_styled_with_colour_and_bold_font() -> None:
     # A bold font resource and colour operators indicate the styled layout.
     assert b"Helvetica-Bold" in gf.data
     assert b" rg" in gf.data  # fill-colour operator used for headings/shading
+
+
+def test_docx_renders_description_as_subtitle() -> None:
+    gf = build_generated_file(
+        file_format="docx",
+        title="Property Report",
+        description="Occupancy across the portfolio for Q2 2026.",
+        columns=COLUMNS,
+        rows=ROWS,
+    )
+    blob = _ooxml_text(gf.data)
+    assert "Occupancy across the portfolio for Q2 2026." in blob
+    assert 'w:val="Subtitle"' in blob
+
+
+def test_pdf_renders_description_context() -> None:
+    gf = build_generated_file(
+        file_format="pdf",
+        title="Report",
+        description="Board-room context for the numbers below.",
+        columns=COLUMNS,
+        rows=ROWS,
+    )
+    assert gf.data.startswith(b"%PDF-1.4")
+    assert b"Board-room context for the numbers below." in gf.data
+
+
+def test_pptx_description_becomes_cover_subtitle() -> None:
+    gf = build_generated_file(
+        file_format="pptx",
+        title="Deck",
+        description="Why occupancy improved this quarter.",
+        columns=COLUMNS,
+        rows=ROWS,
+    )
+    blob = _ooxml_text(gf.data)
+    assert "Why occupancy improved this quarter." in blob
+
+
+def test_pptx_description_prepends_cover_when_slides_given() -> None:
+    gf = build_generated_file(
+        file_format="pptx",
+        title="Deck",
+        description="Executive summary of the portfolio.",
+        slides=[Slide("Top Properties", ["Maple Court", "Oak Ridge"])],
+    )
+    blob = _ooxml_text(gf.data)
+    assert "Executive summary of the portfolio." in blob
+    assert "Top Properties" in blob
+
+
+def test_description_only_is_valid_content() -> None:
+    for fmt in ("pdf", "docx", "pptx"):
+        gf = build_generated_file(file_format=fmt, description="Standalone context.")
+        assert gf.size > 0
 
 
 def test_unsupported_format_raises() -> None:
